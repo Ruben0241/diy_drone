@@ -37,6 +37,7 @@ src/app/     FreeRTOS-Tasks (main.c) und FreeRTOSConfig.h
 tests/       Host-Tests der Kernmodule
 lib/         FreeRTOS-Kernel, CMSIS (Git-Submodule)
 docs/        Bodentest
+tools/analysis/  Python-Auswertung A/B (Sprungantwort, Kennzahlen, Vergleich)
 ```
 
 ### Tasks (Begleitarbeit Kap. 2.4)

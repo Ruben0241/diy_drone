@@ -178,8 +178,10 @@ static void log_task(void *arg)
     for (;;) {
         if (xQueueReceive(log_queue, &s, portMAX_DELAY) == pdTRUE) {
             count++;
-            /* TODO: Datensaetze in den W25Q128-Flash (SPI2) schreiben und
-             * spaeter als CSV auslesen (Kap. 3.4.2). */
+            /* TODO: Datensaetze in den W25Q128-Flash (SPI2) schreiben und spaeter
+             * als CSV auslesen (Kap. 3.4.2). Spalten wie tools/analysis erwartet:
+             * t_us, sp_roll, sp_pitch, sp_yaw, gyro_roll, gyro_pitch, gyro_yaw,
+             * throttle, m1, m2, m3, m4, flags */
         }
     }
 }

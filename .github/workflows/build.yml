@@ -21,6 +21,11 @@ jobs:
           cmake --build build-tests
           ./build-tests/test_core
 
+      - name: Tests der Auswertung (Python)
+        run: |
+          pip install -r tools/analysis/requirements.txt
+          python tools/analysis/test_fc_analysis.py
+
       - name: Firmware bauen
         run: |
           cmake -S . -B build

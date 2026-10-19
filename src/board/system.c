@@ -66,9 +66,23 @@ void system_timer_init(void)
     DWT->CTRL |= DWT_CTRL_CYCCNTENA_Msk;
 }
 
+/* Der 32-Bit-Zykluszaehler laeuft bei 216 MHz nach ~19.9 s ueber. Darum wird er
+ * hier auf 64 Bit erweitert; micros() laeuft so erst nach ~71 min ueber.
+ * Voraussetzung: Aufruf mindestens alle 19 s (der Regel-Task ruft 1000x/s auf). */
 uint32_t micros(void)
 {
-    return DWT->CYCCNT / (SYSCLK_HZ / 1000000u);
+    static uint32_t last_cycles;
+    static uint64_t high_cycles;
+    const uint32_t primask = __get_PRIMASK();
+    __disable_irq();
+    const uint32_t now = DWT->CYCCNT;
+    if (now < last_cycles) {
+        high_cycles += (1ull << 32);
+    }
+    last_cycles = now;
+    const uint64_t total = high_cycles + now;
+    __set_PRIMASK(primask);
+    return (uint32_t)(total / (SYSCLK_HZ / 1000000u));
 }
 
 void delay_us(uint32_t us)
