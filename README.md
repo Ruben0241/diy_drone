@@ -70,8 +70,8 @@ macOS: `brew install cmake` und die Arm GNU Toolchain von developer.arm.com
 (oder `brew install --cask gcc-arm-embedded`).
 
 ```bash
-git clone --recursive <repo-url>
-cd diy-drone-fc
+git clone --recursive https://github.com/Ruben0241/diy_drone
+cd diy_drone
 
 # Tests der Kernmodule auf dem PC
 cmake -S tests -B build-tests && cmake --build build-tests && ./build-tests/test_core
