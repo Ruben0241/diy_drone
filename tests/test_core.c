@@ -14,7 +14,9 @@
 #include "flight.h"
 #include "mahony.h"
 #include "mixer.h"
+#include "params.h"
 #include "pid.h"
+#include "rates.h"
 
 static int failures = 0;
 static int checks = 0;
@@ -97,29 +99,135 @@ static void test_dshot(void)
 
 /* ---------- PID ---------- */
 
+static pid_params_t pid_prm(float p, float i, float d, float f)
+{
+    pid_params_t prm = {
+        .p_gain = p, .i_gain = i, .d_gain = d, .f_gain = f,
+        .i_limit = 400, .sum_limit = 500, .dt = 0.001f,
+        .dterm_lpf1_type = FILTER_OFF, .dterm_lpf2_type = FILTER_OFF,
+        .ff_lpf_hz = 0, .iterm_relax = false, .iterm_relax_hz = 15,
+    };
+    return prm;
+}
+
+static const pid_runtime_t RT_NORMAL = { .i_factor = 1.0f, .d_factor = 1.0f, .stabilise = true };
+
 static void test_pid(void)
 {
     printf("PID\n");
     pid_axis_t pid;
-    pid_init(&pid, 45, 0, 0, 0.001f, 75, 400, 500);
+    pid_params_t prm = pid_prm(45, 0, 0, 0);
+    pid_init(&pid, &prm);
     /* nur P: 100 dps Fehler -> 45 * 0.032029 * 100 */
-    CHECK_NEAR(pid_update(&pid, 100, 0, false), 45 * PID_PTERM_SCALE * 100, 1e-3);
+    CHECK_NEAR(pid_update(&pid, 100, 0, &RT_NORMAL), 45 * PID_PTERM_SCALE * 100, 1e-3);
 
-    pid_init(&pid, 0, 80, 0, 0.001f, 75, 400, 500);
-    for (int i = 0; i < 1000; i++) pid_update(&pid, 10, 0, false);
+    prm = pid_prm(0, 80, 0, 0);
+    pid_init(&pid, &prm);
+    for (int i = 0; i < 1000; i++) pid_update(&pid, 10, 0, &RT_NORMAL);
     /* 1 s bei 10 dps: I = 80 * 0.244381 * 10 * 1 */
     CHECK_NEAR(pid.i_term, 80 * PID_ITERM_SCALE * 10, 0.5);
 
-    /* Anti-Windup: I bleibt begrenzt */
-    for (int i = 0; i < 100000; i++) pid_update(&pid, 500, 0, false);
+    /* I bleibt begrenzt */
+    for (int i = 0; i < 100000; i++) pid_update(&pid, 500, 0, &RT_NORMAL);
     CHECK_NEAR(pid.i_term, 400, 1e-3);
 
-    /* D auf den Istwert: steigender Istwert -> negativer D-Anteil */
-    pid_init(&pid, 0, 0, 30, 0.001f, 1000, 400, 500);
-    pid_update(&pid, 0, 0, false);
+    /* Anti-Windup ueber i_factor: I waechst nicht weiter */
+    pid_reset(&pid);
+    pid_runtime_t rt = RT_NORMAL;
+    rt.i_factor = 0.0f;
+    for (int i = 0; i < 1000; i++) pid_update(&pid, 50, 0, &rt);
+    CHECK_NEAR(pid.i_term, 0, 1e-6);
+
+    /* stabilise = false: Ausgang 0, I zurueckgesetzt */
+    for (int i = 0; i < 100; i++) pid_update(&pid, 50, 0, &RT_NORMAL);
+    CHECK(pid.i_term > 0.0f);
+    rt = RT_NORMAL; rt.stabilise = false;
+    CHECK_NEAR(pid_update(&pid, 50, 0, &rt), 0, 1e-9);
+    CHECK_NEAR(pid.i_term, 0, 1e-9);
+
+    /* D auf den Istwert: steigender Istwert -> negativer D-Anteil, Sollsprung -> kein D */
+    prm = pid_prm(0, 0, 30, 0);
+    pid_init(&pid, &prm);
+    pid_update(&pid, 0, 0, &RT_NORMAL);
     float out = 0;
-    for (int i = 1; i < 50; i++) out = pid_update(&pid, 0, (float)i, false);
+    for (int i = 1; i < 50; i++) out = pid_update(&pid, 0, (float)i, &RT_NORMAL);
     CHECK(out < 0.0f);
+    pid_reset(&pid);
+    pid_update(&pid, 0, 0, &RT_NORMAL);
+    CHECK_NEAR(pid_update(&pid, 300, 0, &RT_NORMAL), 0, 1e-6);
+    /* D = Kd * 1 dps/ms = 30 * 0.000529 * 1000; TPA halbiert */
+    pid_reset(&pid);
+    pid_update(&pid, 0, 0, &RT_NORMAL);
+    CHECK_NEAR(pid_update(&pid, 0, -1, &RT_NORMAL), 30 * PID_DTERM_SCALE * 1000, 1e-3);
+    rt = RT_NORMAL; rt.d_factor = 0.5f;
+    CHECK_NEAR(pid_update(&pid, 0, -2, &rt), 0.5 * 30 * PID_DTERM_SCALE * 1000, 1e-3);
+
+    /* Feedforward: Rampe 0.1 dps/ms -> F = Kf * 100 dps/s */
+    prm = pid_prm(0, 0, 0, 100);
+    pid_init(&pid, &prm);
+    for (int i = 0; i < 20; i++) out = pid_update(&pid, 0.1f * (float)i, 0.1f * (float)i, &RT_NORMAL);
+    CHECK_NEAR(out, 100 * PID_FEEDFORWARD_SCALE * 100, 1e-2);
+
+    /* I-Term-Relax: bei schnellem Sollsprung baut sich kaum I auf */
+    pid_params_t a = pid_prm(0, 80, 0, 0), b = a;
+    b.iterm_relax = true;
+    pid_axis_t pa, pb;
+    pid_init(&pa, &a); pid_init(&pb, &b);
+    for (int i = 0; i < 30; i++) { pid_update(&pa, 400, 0, &RT_NORMAL); pid_update(&pb, 400, 0, &RT_NORMAL); }
+    CHECK(pb.i_term < 0.2f * pa.i_term);
+    /* im Dauerzustand wirkt I wieder normal */
+    for (int i = 0; i < 2000; i++) { pid_update(&pb, 10, 0, &RT_NORMAL); }
+    CHECK(pb.i_term > 30.0f);
+
+    /* Begrenzung der Summe; sum_raw behaelt den echten Wert */
+    prm = pid_prm(200, 0, 0, 0);
+    pid_init(&pid, &prm);
+    CHECK_NEAR(pid_update(&pid, 1000, 0, &RT_NORMAL), 500, 1e-3);
+    CHECK(pid.sum_raw > 500.0f);
+}
+
+/* ---------- Filter und Rates ---------- */
+
+static float sine_gain(void (*init)(biquad_t *, float, float, float), float fc, float q, float f_test)
+{
+    biquad_t bq;
+    init(&bq, fc, 1000.0f, q);
+    float peak = 0;
+    for (int i = 0; i < 4000; i++) {
+        const float y = biquad_apply(&bq, sinf(2.0f * 3.14159265f * f_test * (float)i / 1000.0f));
+        if (i > 3000 && fabsf(y) > peak) peak = fabsf(y);
+    }
+    return peak;
+}
+
+static void test_filters_rates(void)
+{
+    printf("Filter und Rates\n");
+    /* Butterworth-Tiefpass 100 Hz: bei 100 Hz -3 dB (0.707), bei 10 Hz ~1, bei 400 Hz klein */
+    CHECK_NEAR(sine_gain(biquad_init_lpf, 100, 0.7071f, 100), 0.707, 0.02);
+    CHECK_NEAR(sine_gain(biquad_init_lpf, 100, 0.7071f, 10), 1.0, 0.01);
+    CHECK(sine_gain(biquad_init_lpf, 100, 0.7071f, 400) < 0.08f);
+    /* Notch 200 Hz: bei 200 Hz fast 0, weit weg ~1 */
+    const float q = notch_q_from_cutoff(200, 160);
+    CHECK_NEAR(q, 200.0 * 160.0 / (200.0 * 200.0 - 160.0 * 160.0), 1e-4);
+    CHECK(sine_gain(biquad_init_notch, 200, q, 200) < 0.02f);
+    CHECK_NEAR(sine_gain(biquad_init_notch, 200, q, 20), 1.0, 0.02);
+    /* PT1: Gleichanteil wird 1, bei fc Amplitude ~0.707 (nur fuer fc << fs genau) */
+    lpf_stage_t st;
+    lpf_stage_init(&st, FILTER_PT1, 20, 1000);
+    float y = 0;
+    for (int i = 0; i < 2000; i++) y = lpf_stage_apply(&st, 1.0f);
+    CHECK_NEAR(y, 1.0, 1e-4);
+    lpf_stage_init(&st, FILTER_BIQUAD, 600, 1000);   /* ueber Nyquist -> aus */
+    CHECK(st.type == FILTER_OFF);
+
+    /* Rates wie Betaflight "Actual": linear bei center = max */
+    CHECK_NEAR(rates_apply(0.5f, 400, 400, 0.5f), 200, 1e-3);
+    CHECK_NEAR(rates_apply(-1.0f, 400, 400, 0), -400, 1e-3);
+    /* Betaflight-Standard (70 / 670, expo 0): Vollausschlag 670, halber Ausschlag 35 + 600*0.25 */
+    CHECK_NEAR(rates_apply(1.0f, 70, 670, 0), 670, 1e-3);
+    CHECK_NEAR(rates_apply(0.5f, 70, 670, 0), 35 + 600 * 0.25, 1e-3);
+    CHECK_NEAR(rates_apply(-0.5f, 70, 670, 0), -(35 + 600 * 0.25), 1e-3);
 }
 
 /* ---------- Mischer ---------- */
@@ -331,6 +439,192 @@ static void test_flight(void)
     CHECK(f.armed);
 }
 
+/* ---------- Neue Funktionen der Flugsteuerung ---------- */
+
+static void arm_now(flight_t *f, flight_input_t *in, uint16_t thr)
+{
+    set_sticks(in, CRSF_CHANNEL_MIN, CRSF_CHANNEL_MIN);
+    run(f, in, 5);
+    set_sticks(in, CRSF_CHANNEL_MIN, CRSF_CHANNEL_MAX);
+    run(f, in, 5);
+    in->channels[CH_THROTTLE] = thr;
+}
+
+static void test_flight_features(void)
+{
+    printf("Flugsteuerung: Airmode, Runaway, Motortest, ACC, Konfiguration\n");
+    flight_config_t cfg;
+    flight_default_config(&cfg);
+    flight_t f;
+    flight_input_t in;
+    memset(&in, 0, sizeof(in));
+    in.acc_g[2] = 1.0f;
+    in.rc_valid = true;
+
+    /* Gas unten, Airmode noch nicht aktiv: keine Regelung (Motoren nur Leerlauf) */
+    flight_init(&f, &cfg);
+    set_sticks(&in, CRSF_CHANNEL_MIN, CRSF_CHANNEL_MIN);
+    run(&f, &in, 1100);
+    arm_now(&f, &in, CRSF_CHANNEL_MIN);
+    CHECK(f.armed && !f.airmode_active);
+    in.gyro_dps[AXIS_ROLL] = 50.0f;
+    run(&f, &in, 20);
+    CHECK(f.dshot[0] == f.dshot[2]);
+    /* nach einmal Gas > 25 % bleibt die Regelung auch bei Gas 0 aktiv (Flips) */
+    in.channels[CH_THROTTLE] = 900;     /* ca. 44 % */
+    run(&f, &in, 5);
+    CHECK(f.airmode_active);
+    in.channels[CH_THROTTLE] = CRSF_CHANNEL_MIN;
+    run(&f, &in, 20);
+    CHECK(f.dshot[0] > f.dshot[2]);
+    in.gyro_dps[AXIS_ROLL] = 0.0f;
+
+    /* Runaway-Schutz: vor dem Abheben dreht die Drohne weg, Regler am Anschlag -> disarm */
+    flight_init(&f, &cfg);
+    set_sticks(&in, CRSF_CHANNEL_MIN, CRSF_CHANNEL_MIN);
+    run(&f, &in, 1100);
+    arm_now(&f, &in, 400);              /* ca. 14 %: Regelung aktiv, aber noch nicht abgehoben */
+    in.gyro_dps[AXIS_ROLL] = 500.0f;    /* P allein: 45 * 0.032 * 500 = 720 > 600 */
+    run(&f, &in, 300);
+    CHECK(!f.armed && f.runaway_triggered);
+    in.gyro_dps[AXIS_ROLL] = 0.0f;
+    /* ohne Schutz bleibt sie armed */
+    cfg.runaway_prevention = 0.0f;
+    flight_init(&f, &cfg);
+    set_sticks(&in, CRSF_CHANNEL_MIN, CRSF_CHANNEL_MIN);
+    run(&f, &in, 1100);
+    arm_now(&f, &in, 400);
+    in.gyro_dps[AXIS_ROLL] = 500.0f;
+    run(&f, &in, 300);
+    CHECK(f.armed);
+    in.gyro_dps[AXIS_ROLL] = 0.0f;
+    cfg.runaway_prevention = 1.0f;
+
+    /* Anti-Windup: Bei Saettigung (mix_range > 1) waechst I nicht weiter */
+    flight_init(&f, &cfg);
+    set_sticks(&in, CRSF_CHANNEL_MIN, CRSF_CHANNEL_MIN);
+    run(&f, &in, 1100);
+    arm_now(&f, &in, 1200);
+    cfg.runaway_prevention = 0.0f;
+    f.cfg.runaway_prevention = 0.0f;
+    f.runaway_armed = false;
+    in.gyro_dps[AXIS_ROLL] = 2000.0f;
+    run(&f, &in, 50);
+    CHECK(f.mix_range >= 1.0f);
+    const float i_before = f.pid[AXIS_ROLL].i_term;
+    run(&f, &in, 50);
+    CHECK_NEAR(f.pid[AXIS_ROLL].i_term, i_before, 1.0);
+    in.gyro_dps[AXIS_ROLL] = 0.0f;
+    cfg.runaway_prevention = 1.0f;
+
+    /* Motortest: nur disarmed, nur angeforderter Motor, gesperrt bei arm_inhibit */
+    flight_init(&f, &cfg);
+    set_sticks(&in, CRSF_CHANNEL_MIN, CRSF_CHANNEL_MIN);
+    in.motor_test = true;
+    in.motor_test_value[0] = 0; in.motor_test_value[1] = 0.2f;
+    in.motor_test_value[2] = 0; in.motor_test_value[3] = 0;
+    run(&f, &in, 2);
+    CHECK(f.dshot[1] > 48 && f.dshot[0] == 0 && f.dshot[2] == 0);
+    in.arm_inhibit = true;
+    run(&f, &in, 1);
+    CHECK(f.dshot[1] == 0);
+    in.arm_inhibit = false;
+    in.motor_test = false;
+
+    /* ACC-Kalibrierung */
+    flight_init(&f, &cfg);
+    in.acc_g[0] = 0.02f; in.acc_g[1] = -0.03f; in.acc_g[2] = 1.05f;
+    run(&f, &in, 1100);
+    flight_start_acc_calibration(&f);
+    run(&f, &in, 600);
+    CHECK(f.acc_cal_done);
+    CHECK_NEAR(f.cfg.acc_bias[0], 0.02, 1e-4);
+    CHECK_NEAR(f.cfg.acc_bias[1], -0.03, 1e-4);
+    CHECK_NEAR(f.cfg.acc_bias[2], 0.05, 1e-4);
+    run(&f, &in, 3000);
+    CHECK(fabsf(f.attitude_deg[0]) < 0.5f && fabsf(f.attitude_deg[1]) < 0.5f);
+    in.acc_g[0] = 0; in.acc_g[1] = 0; in.acc_g[2] = 1.0f;
+
+    /* Neue Konfiguration uebernehmen: Kalibrierung bleibt, armed -> abgelehnt */
+    flight_config_t c2 = cfg;
+    c2.pid_p[AXIS_ROLL] = 60;
+    CHECK(flight_apply_config(&f, &c2));
+    CHECK(f.calibrated);
+    CHECK_NEAR(f.pid[AXIS_ROLL].kp, 60 * PID_PTERM_SCALE, 1e-6);
+    arm_now(&f, &in, CRSF_CHANNEL_MIN);
+    CHECK(f.armed);
+    CHECK(!flight_apply_config(&f, &cfg));
+}
+
+/* ---------- Einstellungen ---------- */
+
+static void test_params(void)
+{
+    printf("Einstellungen\n");
+    float v;
+    CHECK(params_parse_float("12.5", &v) && v == 12.5f);
+    CHECK(params_parse_float("-0.25", &v) && v == -0.25f);
+    CHECK(params_parse_float(" 7 ", &v) && v == 7.0f);
+    CHECK(!params_parse_float("abc", &v));
+    CHECK(!params_parse_float("1.2.3", &v));
+    CHECK(!params_parse_float("", &v));
+
+    flight_config_t a, b;
+    flight_default_config(&a);
+    CHECK(params_set(&a, "p_roll", "52"));
+    CHECK(a.pid_p[AXIS_ROLL] == 52.0f);
+    CHECK(params_set(&a, "gyro_sign_yaw", "-1"));
+    CHECK(!params_set(&a, "gyro_sign_yaw", "0.5"));     /* nur +1/-1 */
+    CHECK(!params_set(&a, "p_roll", "999"));             /* ausserhalb */
+    CHECK(!params_set(&a, "gibts_nicht", "1"));
+    CHECK(params_set(&a, "roll_expo", "0.35"));
+    CHECK(params_set(&a, "acc_bias_x", "0.0123"));
+
+    char line[64];
+    params_format(&a, params_find("p_roll"), line, sizeof(line));
+    CHECK(strcmp(line, "p_roll = 52") == 0);
+
+    /* Text speichern und laden ergibt dieselben Werte */
+    char buf[4096];
+    const int n = params_serialize(&a, buf, sizeof(buf));
+    CHECK(n > 0);
+    flight_default_config(&b);
+    CHECK(params_deserialize(&b, buf, n) == params_count());
+    for (int i = 0; i < params_count(); i++) {
+        CHECK_NEAR(params_get(&a, i), params_get(&b, i), 1e-4);
+    }
+    /* unbekannte und kaputte Zeilen werden ignoriert */
+    const char *txt = "p_roll=33\nfoo=1\nkaputt\ni_roll=xx\nd_roll=20";
+    flight_default_config(&b);
+    CHECK(params_deserialize(&b, txt, (int)strlen(txt)) == 2);
+    CHECK(b.pid_p[AXIS_ROLL] == 33.0f && b.pid_d[AXIS_ROLL] == 20.0f && b.pid_i[AXIS_ROLL] == 80.0f);
+    /* alle Standardwerte liegen im erlaubten Bereich */
+    flight_default_config(&b);
+    for (int i = 0; i < params_count(); i++) {
+        const param_def_t *d = params_def(i);
+        const float x = params_get(&b, i);
+        if (x < d->min || x > d->max) { printf("  Standardwert ausserhalb: %s\n", d->name); failures++; }
+        checks++;
+    }
+    CHECK(params_crc32("123456789", 9) == 0xCBF43926u);   /* Pruefwert CRC-32 */
+
+    /* Speicherblock: packen, entpacken, Beschaedigung erkennen */
+    static uint8_t blob[4096];
+    flight_default_config(&a);
+    a.pid_d[AXIS_PITCH] = 41;
+    const int bl = params_pack(&a, blob, sizeof(blob));
+    CHECK(bl > PARAMS_HEADER);
+    flight_default_config(&b);
+    CHECK(params_unpack(&b, blob, bl) == params_count());
+    CHECK(b.pid_d[AXIS_PITCH] == 41.0f);
+    blob[PARAMS_HEADER + 5] ^= 0x20;
+    flight_default_config(&b);
+    CHECK(params_unpack(&b, blob, bl) == -1);
+    CHECK(b.pid_d[AXIS_PITCH] == 34.0f);
+    memset(blob, 0xFF, 64);                          /* geloeschter Flash */
+    CHECK(params_unpack(&b, blob, 64) == -1);
+}
+
 /* ---------- Logformat ---------- */
 
 static void test_logrec(const char *sample_path)
@@ -365,11 +659,13 @@ static void test_logrec(const char *sample_path)
 
     logrec_header_t h = { .git_hash = 0xDEADBEEFu, .loop_hz = 1000, .log_hz = 1000,
         .pid = { {45, 80, 30}, {47, 84, 34}, {45, 80, 0} },
-        .max_rate_dps = 400, .gyro_lpf_hz = 150, .dterm_lpf_hz = 75 };
+        .max_rate_dps = 400, .gyro_lpf_hz = 150, .dterm_lpf_hz = 75,
+        .ff = { 120, 125, 0 }, .flags = 0x05 };
     logrec_encode_header(&h, r);
     CHECK(r[0] == LOGREC_TYPE_HEADER && r[1] == LOGREC_VERSION);
     CHECK(r[2] == 0xEF && r[5] == 0xDE);
     CHECK(r[10] == 45 && r[13] == 47 && r[18] == 0);
+    CHECK(r[23] == 120 && r[25] == 125 && r[29] == 0x05);
     CHECK(logrec_crc_ok(r));
 
     /* Beispieldatei fuer den Python-Test (Kopf + 20 Datensaetze + Fuellung) */
@@ -468,9 +764,12 @@ int main(int argc, char **argv)
     test_crsf();
     test_dshot();
     test_pid();
+    test_filters_rates();
     test_mixer();
     test_mahony();
     test_flight();
+    test_flight_features();
+    test_params();
     test_logrec(argc > 1 ? argv[1] : NULL);
     test_blackbox();
     printf("\n%d Pruefungen, %d Fehler\n", checks, failures);

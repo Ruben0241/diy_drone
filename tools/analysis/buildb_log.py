@@ -17,7 +17,8 @@ import pandas as pd
 REC = 32
 TYPE_DATA, TYPE_HEADER, TYPE_PAD, TYPE_ERASED = 0xA5, 0x5A, 0x00, 0xFF
 DATA_STRUCT = struct.Struct("<BBI3h3h4HHHB")      # ohne CRC (31 Byte)
-HEADER_STRUCT = struct.Struct("<BBIHH9BHBB")       # 23 Byte, Rest reserviert
+HEADER_STRUCT = struct.Struct("<BBIHH9BHBB")       # 23 Byte (Version 1)
+HEADER_V2_EXTRA = struct.Struct("<3HB")             # Byte 23..29: Feedforward, Flags (Version 2)
 
 
 def crc8_d5(data: bytes) -> int:
@@ -94,6 +95,12 @@ def decode(data: bytes) -> DecodeResult:
                 "gyro_lpf_hz": v[15],
                 "dterm_lpf_hz": v[16],
             }
+            if v[1] >= 2:
+                e = HEADER_V2_EXTRA.unpack_from(rec, 23)
+                header["ff"] = {"roll": e[0], "pitch": e[1], "yaw": e[2]}
+                header["iterm_relax"] = bool(e[3] & 1)
+                header["tpa"] = bool(e[3] & 2)
+                header["runaway_prevention"] = bool(e[3] & 4)
             current = Flight(index=len(flights) + 1, header=header)
             flights.append(current)
             continue

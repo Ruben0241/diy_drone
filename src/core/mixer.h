@@ -23,6 +23,8 @@ typedef struct {
 } mixer_config_t;
 
 /* throttle: 0 ... 1, roll/pitch/yaw: PID-Summe / PID_MIXER_SCALING (ca. -0.5 ... 0.5)
- * out: Motorwerte 0 ... 1 */
-void mixer_mix(const mixer_config_t *cfg, float throttle, float roll, float pitch, float yaw,
+ * out: Motorwerte 0 ... 1
+ * Rueckgabe: Spannweite der Regleranteile (max - min) vor dem Verkleinern.
+ *            > 1 bedeutet Saettigung (fuer Anti-Windup und Runaway-Erkennung). */
+float mixer_mix(const mixer_config_t *cfg, float throttle, float roll, float pitch, float yaw,
                float out[MIXER_MOTOR_COUNT]);

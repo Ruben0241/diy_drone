@@ -30,4 +30,21 @@ extern SemaphoreHandle_t  g_flash_mutex;
 /* true, solange ueber USB geloescht oder heruntergeladen wird -> nicht armen */
 extern volatile bool      g_cli_busy;
 
-void usb_cli_start(void);
+/* Neue Einstellungen fuer den Regel-Task (wird nur disarmed uebernommen) */
+extern flight_config_t    g_cfg_new;
+extern volatile bool      g_cfg_new_pending;
+extern volatile bool      g_cfg_from_flash;        /* beim Start gespeicherte Werte geladen */
+
+/* Motortest (nur disarmed, ohne Propeller) */
+extern volatile float     g_motor_test_value[4];
+extern volatile uint32_t  g_motor_test_until_ms;
+extern volatile bool      g_acc_cal_request;
+
+/* Zeitmessung der Regelschleife [us] */
+extern volatile uint32_t  g_loop_us_max, g_loop_us_avg_x10;
+extern volatile uint32_t  g_cycle_us_min, g_cycle_us_max;
+
+void     usb_cli_start(void);
+uint32_t config_store_addr(void);
+int      config_store_load(flight_config_t *cfg);
+bool     config_store_save(const flight_config_t *cfg);

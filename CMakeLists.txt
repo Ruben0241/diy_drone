@@ -28,6 +28,7 @@ add_executable(firmware.elf
     ${LIB}/cmsis_device_f7/Source/Templates/gcc/startup_stm32f722xx.s
 
     # Hardwareunabhaengiger Kern
+    src/core/biquad.c
     src/core/blackbox.c
     src/core/crsf.c
     src/core/dshot.c
@@ -35,8 +36,10 @@ add_executable(firmware.elf
     src/core/logrec.c
     src/core/mahony.c
     src/core/mixer.c
+    src/core/params.c
     src/core/pid.c
     src/core/pt1.c
+    src/core/rates.c
 
     # Board GEPRC TAKER F722
     src/board/system.c
@@ -50,6 +53,7 @@ add_executable(firmware.elf
 
     # Anwendung
     src/app/main.c
+    src/app/config_store.c
     src/app/usb_cli.c
     src/app/usb_descriptors.c
 
@@ -87,8 +91,9 @@ target_include_directories(firmware.elf PRIVATE
 
 # Strenge Warnungen nur fuer den eigenen Code
 set_source_files_properties(
-    src/core/blackbox.c src/core/crsf.c src/core/dshot.c src/core/flight.c
-    src/core/logrec.c src/core/mahony.c src/core/mixer.c src/core/pid.c src/core/pt1.c
+    src/core/biquad.c src/core/blackbox.c src/core/crsf.c src/core/dshot.c src/core/flight.c
+    src/core/logrec.c src/core/mahony.c src/core/mixer.c src/core/params.c src/core/pid.c
+    src/core/pt1.c src/core/rates.c src/app/config_store.c
     src/board/system.c src/board/spi.c src/board/flash_w25q.c src/board/icm42688.c
     src/board/rx_uart.c src/board/dshot_tim3.c src/board/peripherals.c
     src/app/main.c src/app/usb_cli.c src/app/usb_descriptors.c

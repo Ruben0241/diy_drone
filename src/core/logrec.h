@@ -19,7 +19,7 @@
  *
  * Kopf (Typ 0x5A), einmal beim Armen (Beginn eines Flugs):
  *   0      Typ 0x5A
- *   1      Formatversion (1)
+ *   1      Formatversion (2)
  *   2..5   Git-Commit der Firmware (erste 8 Hex-Ziffern), uint32
  *   6..7   Regelfrequenz [Hz], uint16
  *   8..9   Logfrequenz [Hz], uint16
@@ -27,7 +27,9 @@
  *   19..20 maximale Drehrate [dps], uint16
  *   21     Gyro-Tiefpass [Hz], uint8
  *   22     D-Tiefpass [Hz], uint8
- *   23..30 reserviert (0)
+ *   23..28 Feedforward F roll, pitch, yaw (Betaflight-Zahlen), uint16   (ab Version 2)
+ *   29     Flags: Bit0 I-Term-Relax, Bit1 TPA, Bit2 Runaway-Schutz      (ab Version 2)
+ *   30     reserviert (0)
  *   31     CRC8
  *
  * Fuellsatz (Typ 0x00): fuellt beim Disarmen den Rest der Flash-Seite.
@@ -43,7 +45,7 @@
 #define LOGREC_TYPE_HEADER  0x5Au
 #define LOGREC_TYPE_PAD     0x00u
 #define LOGREC_TYPE_ERASED  0xFFu
-#define LOGREC_VERSION      1u
+#define LOGREC_VERSION      2u
 
 #define LOGREC_FLAG_ARMED    0x01u
 #define LOGREC_FLAG_FAILSAFE 0x02u
@@ -68,6 +70,8 @@ typedef struct {
     uint16_t max_rate_dps;
     uint8_t  gyro_lpf_hz;
     uint8_t  dterm_lpf_hz;
+    float    ff[3];           /* Feedforward roll, pitch, yaw */
+    uint8_t  flags;
 } logrec_header_t;
 
 uint8_t logrec_crc8(const uint8_t *data, uint32_t len);

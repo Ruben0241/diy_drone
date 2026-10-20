@@ -11,6 +11,14 @@
  *   erase all       ganzen Flash loeschen (bis 200 s)
  *   dfu             Neustart in den Bootloader (zum Flashen)
  *   reboot          Neustart
+ *   get [anfang]    Einstellungen anzeigen (optional nur Namen mit diesem Anfang)
+ *   set name wert   Einstellung aendern (sofort wirksam, disarmed)
+ *   save            Einstellungen im Flash speichern
+ *   diff            nur Abweichungen vom Standard anzeigen (fuer die Dokumentation)
+ *   defaults        alle Einstellungen auf Standard (erst mit save dauerhaft)
+ *   motor n prozent Motortest ohne Propeller: n = 1..4 oder all, max. 40 %, 3 s
+ *   motor stop      Motortest beenden
+ *   acccal          Beschleunigungssensor kalibrieren (waagrecht und still hinstellen)
  *
  * dump/erase/dfu/reboot sind nur moeglich, wenn nicht gearmt. Waehrend dump
  * und erase ist das Armen gesperrt. Das Gegenstueck am PC: tools/fc_cli.py
@@ -24,6 +32,7 @@
 #include "app_shared.h"
 #include "board.h"
 #include "flash_w25q.h"
+#include "params.h"
 #include "system.h"
 
 /* ---------- USB-Hardware ---------- */
@@ -145,7 +154,160 @@ static void say(const char *s)
 
 static void cmd_help(void)
 {
-    say("Befehle: help, info, status, live, dump, erase, erase all, dfu, reboot");
+    say("Befehle: help, info, status, live, dump, erase, erase all, dfu, reboot,");
+    say("         get [anfang], set name wert, save, diff, defaults, motor n %, motor stop, acccal");
+}
+
+/* ---------- Einstellungen ---------- */
+
+static flight_config_t cfg_edit;
+static bool cfg_edit_ok;
+
+static void cfg_edit_init(void)
+{
+    if (!cfg_edit_ok) {
+        cfg_edit = g_flight.cfg;
+        cfg_edit_ok = true;
+    }
+}
+
+static void push_config(void)
+{
+    for (int i = 0; i < 100 && g_cfg_new_pending; i++) vTaskDelay(1);
+    g_cfg_new = cfg_edit;
+    __DMB();
+    g_cfg_new_pending = true;
+}
+
+static void print_param(const flight_config_t *c, int i)
+{
+    char buf[64];
+    params_format(c, i, buf, sizeof(buf));
+    say(buf);
+}
+
+static void cmd_get(const char *prefix)
+{
+    cfg_edit_init();
+    const size_t n = strlen(prefix);
+    for (int i = 0; i < params_count(); i++) {
+        if (n == 0 || strncmp(params_def(i)->name, prefix, n) == 0) print_param(&cfg_edit, i);
+    }
+}
+
+static void cmd_diff(void)
+{
+    cfg_edit_init();
+    flight_config_t def;
+    flight_default_config(&def);
+    say("# Abweichungen vom Standard");
+    for (int i = 0; i < params_count(); i++) {
+        const float a = params_get(&cfg_edit, i), b = params_get(&def, i);
+        if (a - b > 1e-5f || b - a > 1e-5f) {
+            char buf[64];
+            params_format(&cfg_edit, i, buf, sizeof(buf));
+            o_str("set "); o_str(buf); o_line();
+        }
+    }
+}
+
+static bool refuse_if_armed(void);
+
+static void cmd_set(char *args)
+{
+    if (refuse_if_armed()) return;
+    cfg_edit_init();
+    char *name = args;
+    while (*name == ' ') name++;
+    char *val = strchr(name, ' ');
+    if (!val) { say("ERR Aufruf: set name wert"); return; }
+    *val++ = 0;
+    char *eq = strchr(name, '=');   /* auch "set name=wert" */
+    if (eq) { *eq = 0; val = eq + 1; }
+    while (*val == ' ' || *val == '=') val++;
+    if (!params_set(&cfg_edit, name, val)) {
+        const int i = params_find(name);
+        if (i < 0) { o_str("ERR unbekannt: "); o_str(name); o_line(); return; }
+        const param_def_t *d = params_def(i);
+        o_str("ERR Bereich "); o_fix(d->min, d->decimals); o_str(" .. "); o_fix(d->max, d->decimals);
+        o_line();
+        return;
+    }
+    push_config();
+    print_param(&cfg_edit, params_find(name));
+    say("OK (dauerhaft erst mit save)");
+}
+
+static void cmd_save(void)
+{
+    if (refuse_if_armed()) return;
+    cfg_edit_init();
+    g_cli_busy = true;
+    xSemaphoreTake(g_flash_mutex, portMAX_DELAY);
+    const bool ok = config_store_save(&cfg_edit);
+    xSemaphoreGive(g_flash_mutex);
+    g_cli_busy = false;
+    say(ok ? "OK gespeichert" : "ERR speichern fehlgeschlagen");
+}
+
+static void cmd_defaults(void)
+{
+    if (refuse_if_armed()) return;
+    flight_default_config(&cfg_edit);
+    cfg_edit.loop_hz = g_flight.cfg.loop_hz;
+    cfg_edit_ok = true;
+    push_config();
+    say("OK Standardwerte aktiv (dauerhaft erst mit save)");
+}
+
+/* ---------- Motortest und ACC-Kalibrierung ---------- */
+
+static void cmd_motor(char *args)
+{
+    if (refuse_if_armed()) return;
+    while (*args == ' ') args++;
+    if (strncmp(args, "stop", 4) == 0) {
+        g_motor_test_until_ms = xTaskGetTickCount();
+        for (int m = 0; m < 4; m++) g_motor_test_value[m] = 0.0f;
+        say("OK");
+        return;
+    }
+    char *pct = strchr(args, ' ');
+    float p;
+    if (!pct || !params_parse_float(pct + 1, &p) || p < 0.0f || p > 40.0f) {
+        say("ERR Aufruf: motor <1-4|all> <0-40>  (ohne Propeller!)");
+        return;
+    }
+    *pct = 0;
+    int sel = -1;
+    if (strcmp(args, "all") != 0) {
+        float n;
+        if (!params_parse_float(args, &n) || n < 1.0f || n > 4.0f) { say("ERR Motor 1-4 oder all"); return; }
+        sel = (int)n - 1;
+    }
+    for (int m = 0; m < 4; m++) g_motor_test_value[m] = (sel < 0 || sel == m) ? p / 100.0f : 0.0f;
+    g_motor_test_until_ms = xTaskGetTickCount() + 3000u;
+    say("OK 3 s (ohne Propeller!)");
+}
+
+static void cmd_acccal(void)
+{
+    if (refuse_if_armed()) return;
+    cfg_edit_init();
+    g_acc_cal_request = true;
+    say("ACC-Kalibrierung: Drohne waagrecht und still halten ...");
+    for (int i = 0; i < 40; i++) {
+        vTaskDelay(pdMS_TO_TICKS(100));
+        if (!g_acc_cal_request && g_flight.acc_cal_done) {
+            for (int k = 0; k < 3; k++) cfg_edit.acc_bias[k] = g_flight.cfg.acc_bias[k];
+            o_str("acc_bias x="); o_fix(cfg_edit.acc_bias[0], 4);
+            o_str(" y="); o_fix(cfg_edit.acc_bias[1], 4);
+            o_str(" z="); o_fix(cfg_edit.acc_bias[2], 4); o_line();
+            say("OK (dauerhaft erst mit save)");
+            return;
+        }
+    }
+    say("ERR Kalibrierung nicht abgeschlossen (bewegt?)");
 }
 
 static void cmd_info(void)
@@ -175,6 +337,13 @@ static void cmd_info(void)
     o_str(" loop_overruns="); o_u32(g_loop_overruns); o_line();
     o_str("rx frames="); o_u32(g_rc_frames); o_str(" crc_errors="); o_u32(g_rc_crc_errors);
     o_str(" lq="); o_u32(g_link_quality); o_line();
+    o_str("loop avg_us="); o_fix((float)g_loop_us_avg_x10 / 10.0f, 1);
+    o_str(" max_us="); o_u32(g_loop_us_max);
+    o_str(" period_us min="); o_u32(g_cycle_us_min); o_str(" max="); o_u32(g_cycle_us_max); o_line();
+    o_str("config "); o_str(g_cfg_from_flash ? "gespeichert (Flash)" : "Standardwerte");
+    o_str(g_cfg_new_pending ? " (Aenderung wartet auf disarm)" : ""); o_line();
+    o_str("airmode="); o_u32(g_flight.airmode_active);
+    o_str(" runaway_triggered="); o_u32(g_flight.runaway_triggered); o_line();
     o_str("vbat "); o_fix(g_vbat_volts, 2); o_line();
 }
 
@@ -294,6 +463,14 @@ static void handle_line(char *line)
     else if (!strcmp(line, "erase all")) cmd_erase(true);
     else if (!strcmp(line, "dfu")) cmd_reboot(true);
     else if (!strcmp(line, "reboot")) cmd_reboot(false);
+    else if (!strcmp(line, "get")) cmd_get("");
+    else if (!strncmp(line, "get ", 4)) cmd_get(line + 4);
+    else if (!strncmp(line, "set ", 4)) cmd_set(line + 4);
+    else if (!strcmp(line, "save")) cmd_save();
+    else if (!strcmp(line, "diff")) cmd_diff();
+    else if (!strcmp(line, "defaults")) cmd_defaults();
+    else if (!strncmp(line, "motor ", 6)) cmd_motor(line + 6);
+    else if (!strcmp(line, "acccal")) cmd_acccal();
     else { o_str("ERR unbekannt: "); o_str(line); o_line(); }
 }
 

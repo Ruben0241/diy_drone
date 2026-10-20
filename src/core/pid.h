@@ -1,46 +1,70 @@
 /*
- * pid.h - Drehraten-PID-Regler (eine Achse)
+ * pid.h - Drehraten-Regler einer Achse (P, I, D, Feedforward)
  *
- * Die Verstaerkungen werden in denselben Zahlen angegeben wie in Betaflight
- * (z. B. P=45, I=80, D=30). Intern werden sie mit denselben Skalierungs-
- * faktoren wie in Betaflight umgerechnet (PTERM_SCALE usw.), damit die Werte
- * zwischen Build A und Build B direkt vergleichbar sind.
+ * Verstaerkungen in Betaflight-Zahlen (z. B. P=45, I=80, D=30, F=120), intern mit
+ * denselben Skalierungsfaktoren wie Betaflight (src/main/flight/pid.h). So sind die
+ * Werte von Build A und Build B direkt vergleichbar.
  *
- * Ausgang: "PID-Summe" in Betaflight-Einheiten (1000 = voller Motorbereich).
- * Fuer den Mischer wird durch PID_MIXER_SCALING geteilt.
+ * Ausgang in Betaflight-Einheiten (1000 = voller Motorbereich).
  *
- * Diskrete Form (vgl. Begleitarbeit Kap. 2.2, Gl. 2.3):
+ *   e = Soll - Ist
  *   P = Kp * e
- *   I = I + Ki * e * dt            (begrenzt, Anti-Windup)
- *   D = Kd * (-(y_k - y_{k-1}) / dt), D auf den Istwert, PT1-gefiltert
+ *   I = I + Ki * e * dt * relax * windup     (begrenzt auf +-i_limit)
+ *   D = -Kd * d(Ist)/dt * tpa                 (D auf den Istwert, zweistufig gefiltert)
+ *   F = Kf * d(Soll)/dt                       (Feedforward, gefiltert)
+ *
+ * I-Term-Relax (wie Betaflight, Typ "Setpoint"): Waehrend schneller Stickbewegungen
+ * wird das Aufintegrieren gebremst, sonst ueberschwingt die Drohne nach Flips:
+ *   hp = |Soll - PT1(Soll)|,  relax = max(0, 1 - hp / 40 dps)
  */
 #pragma once
 
 #include <stdbool.h>
+#include "biquad.h"
 #include "pt1.h"
 
-/* Skalierung wie Betaflight (src/main/flight/pid.h) */
-#define PID_PTERM_SCALE     0.032029f
-#define PID_ITERM_SCALE     0.244381f
-#define PID_DTERM_SCALE     0.000529f
-#define PID_MIXER_SCALING   1000.0f
+#define PID_PTERM_SCALE        0.032029f
+#define PID_ITERM_SCALE        0.244381f
+#define PID_DTERM_SCALE        0.000529f
+#define PID_FEEDFORWARD_SCALE  0.013754f
+#define PID_MIXER_SCALING      1000.0f
+#define ITERM_RELAX_THRESHOLD  40.0f      /* dps, wie Betaflight */
 
 typedef struct {
-    float kp, ki, kd;        /* bereits skaliert */
-    float i_limit;           /* Betrag-Grenze fuer I (PID-Einheiten) */
-    float sum_limit;         /* Betrag-Grenze fuer P+I+D */
-    float dt;                /* Abtastzeit [s] */
+    float p_gain, i_gain, d_gain, f_gain;  /* Betaflight-Zahlen */
+    float i_limit;                         /* PID-Einheiten (Betaflight: 400) */
+    float sum_limit;                       /* PID-Einheiten (Betaflight: 500 / 400 Yaw) */
+    float dt;
+    int   dterm_lpf1_type; float dterm_lpf1_hz;
+    int   dterm_lpf2_type; float dterm_lpf2_hz;
+    float ff_lpf_hz;                       /* Glaettung des Feedforward (0 = aus) */
+    bool  iterm_relax;
+    float iterm_relax_hz;                  /* Betaflight: 15 Hz */
+} pid_params_t;
+
+typedef struct {
+    float i_factor;    /* 0..1: Anti-Windup bei Motorsaettigung (1 = normal) */
+    float d_factor;    /* 0..1: TPA (Throttle PID Attenuation) */
+    bool  stabilise;   /* false: Ausgang 0 und I zuruecksetzen (am Boden, Gas unten) */
+} pid_runtime_t;
+
+typedef struct {
+    float kp, ki, kd, kf;
+    float i_limit, sum_limit, dt;
+    bool  iterm_relax;
 
     float i_term;
-    float prev_measurement;
+    float prev_measurement, prev_setpoint;
     bool  has_prev;
-    pt1_t dterm_lpf;
+    lpf_stage_t dterm1, dterm2;
+    pt1_t ff_lpf, relax_lpf;
 
-    /* letzte Werte, fuer Logging */
-    float p, i, d, out;
+    /* letzte Werte (Logging, Anzeige, Runaway-Erkennung) */
+    float p, i, d, f;
+    float sum_raw;     /* P+I+D+F vor der Begrenzung */
+    float out;         /* begrenzt */
 } pid_axis_t;
 
-void  pid_init(pid_axis_t *pid, float p_gain, float i_gain, float d_gain,
-               float dt, float dterm_lpf_hz, float i_limit, float sum_limit);
-float pid_update(pid_axis_t *pid, float setpoint, float measurement, bool freeze_i);
+void  pid_init(pid_axis_t *pid, const pid_params_t *prm);
+float pid_update(pid_axis_t *pid, float setpoint, float measurement, const pid_runtime_t *rt);
 void  pid_reset(pid_axis_t *pid);

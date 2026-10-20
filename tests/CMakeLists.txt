@@ -6,7 +6,10 @@ set(CORE ${CMAKE_CURRENT_SOURCE_DIR}/../src/core)
 
 add_executable(test_core
     test_core.c
+    ${CORE}/biquad.c
     ${CORE}/blackbox.c
+    ${CORE}/params.c
+    ${CORE}/rates.c
     ${CORE}/crsf.c
     ${CORE}/logrec.c
     ${CORE}/dshot.c

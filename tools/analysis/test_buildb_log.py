@@ -51,6 +51,9 @@ def test_sample_from_firmware_code():
     assert f.header["git_hash"] == "deadbeef"
     assert f.header["pid"]["roll"] == (45, 80, 30)
     assert f.header["max_rate_dps"] == 400
+    assert f.header["format_version"] == 2
+    assert f.header["ff"] == {"roll": 120, "pitch": 125, "yaw": 0}
+    assert f.header["iterm_relax"] and not f.header["tpa"] and f.header["runaway_prevention"]
     df = f.to_dataframe()
     assert len(df) == 20
     assert df.t_us.iloc[0] == 1_000_000 and df.t_us.iloc[19] == 1_019_000

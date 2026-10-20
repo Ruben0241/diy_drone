@@ -9,7 +9,7 @@ static const float mix_table[MIXER_MOTOR_COUNT][3] = {
     {  1.0f, -1.0f, -1.0f },   /* M4 vorne links   */
 };
 
-void mixer_mix(const mixer_config_t *cfg, float throttle, float roll, float pitch, float yaw,
+float mixer_mix(const mixer_config_t *cfg, float throttle, float roll, float pitch, float yaw,
                float out[MIXER_MOTOR_COUNT])
 {
     if (!cfg->yaw_motors_reversed) {
@@ -40,4 +40,5 @@ void mixer_mix(const mixer_config_t *cfg, float throttle, float roll, float pitc
     for (int i = 0; i < MIXER_MOTOR_COUNT; i++) {
         out[i] = constrainf(throttle + mix[i], 0.0f, 1.0f);
     }
+    return range;
 }

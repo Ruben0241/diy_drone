@@ -61,6 +61,10 @@ void logrec_encode_header(const logrec_header_t *h, uint8_t out[LOGREC_SIZE])
     put_u16(&out[19], h->max_rate_dps);
     out[21] = h->gyro_lpf_hz;
     out[22] = h->dterm_lpf_hz;
+    for (int a = 0; a < 3; a++) {
+        put_u16(&out[23 + 2 * a], (uint16_t)round_clamp(h->ff[a], 0, 65535));
+    }
+    out[29] = h->flags;
     finish(out);
 }
 

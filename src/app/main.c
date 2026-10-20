@@ -58,6 +58,16 @@ volatile uint32_t  g_log_queue_drops;
 blackbox_t         g_blackbox;
 SemaphoreHandle_t  g_flash_mutex;
 volatile bool      g_cli_busy;
+flight_config_t    g_cfg_new;
+volatile bool      g_cfg_new_pending;
+volatile bool      g_cfg_from_flash;
+volatile float     g_motor_test_value[4];
+volatile uint32_t  g_motor_test_until_ms;
+volatile bool      g_acc_cal_request;
+volatile uint32_t  g_loop_us_max, g_loop_us_avg_x10;
+volatile uint32_t  g_cycle_us_min = 0xFFFFFFFFu, g_cycle_us_max;
+
+static flight_config_t boot_cfg;   /* beim Start geladen (Flash oder Standard) */
 
 /* ---------- lokale Daten ---------- */
 
@@ -80,6 +90,7 @@ static rc_shared_t   rc_shared;
 static TaskHandle_t  control_task_handle;
 static QueueHandle_t log_queue;
 static volatile bool beep_request;
+static volatile bool runaway_beep;
 
 /* ---------- Data-Ready-Interrupt -> Regel-Task wecken ---------- */
 
@@ -97,17 +108,17 @@ static void on_gyro_drdy(void)
 static void control_task(void *arg)
 {
     (void)arg;
-    flight_config_t cfg;
-    flight_default_config(&cfg);
+    /* Einstellungen: gespeichert (USB "save") oder Standard. Vorzeichen-Korrekturen
+     * aus dem Bodentest werden per "set gyro_sign_... -1" und "save" gesetzt. */
+    flight_config_t cfg = boot_cfg;
     cfg.loop_hz = (float)LOOP_HZ;
-    /* Vorzeichen-Korrekturen nach dem Bodentest hier eintragen, z. B.:
-     * cfg.gyro_sign[AXIS_YAW] = -1.0f; */
     flight_init(&g_flight, &cfg);
 
     flight_input_t in;
     memset(&in, 0, sizeof(in));
     imu_sample_t imu;
     uint32_t log_count = 0;
+    uint32_t last_start = 0, t_sum = 0, t_n = 0, t_max = 0;
 
     for (;;) {
         if (ulTaskNotifyTake(pdTRUE, pdMS_TO_TICKS(GYRO_TIMEOUT_MS)) == 0) {
@@ -120,6 +131,25 @@ static void control_task(void *arg)
         }
         g_gyro_ok = true;
         const uint32_t t0 = micros();
+        if (last_start) {
+            const uint32_t period = t0 - last_start;
+            if (period < g_cycle_us_min) g_cycle_us_min = period;
+            if (period > g_cycle_us_max) g_cycle_us_max = period;
+        }
+        last_start = t0;
+
+        /* Aenderungen von der USB-Befehlszeile (nur disarmed) */
+        if (g_cfg_new_pending && !g_flight.armed) {
+            flight_apply_config(&g_flight, &g_cfg_new);
+            g_cfg_new_pending = false;
+        }
+        if (g_acc_cal_request && !g_flight.armed) {
+            g_acc_cal_request = false;
+            flight_start_acc_calibration(&g_flight);
+        }
+        const uint32_t now_ms = xTaskGetTickCount();
+        in.motor_test = !g_flight.armed && (int32_t)(g_motor_test_until_ms - now_ms) > 0;
+        for (int m = 0; m < 4; m++) in.motor_test_value[m] = g_motor_test_value[m];
 
         icm42688_read(&imu);
         memcpy(in.gyro_dps, imu.gyro_dps, sizeof(in.gyro_dps));
@@ -140,6 +170,12 @@ static void control_task(void *arg)
         if (g_flight.event_armed || g_flight.event_disarmed || g_flight.event_failsafe) {
             beep_request = true;
         }
+        if (g_flight.event_runaway) {
+            runaway_beep = true;
+        }
+        if (g_flight.event_armed) {
+            g_motor_test_until_ms = now_ms;   /* Motortest beim Armen sofort beenden */
+        }
 
         /* Messdaten fuers Logging (nicht blockierend) */
         if (++log_count >= LOG_DIVIDER) {
@@ -158,6 +194,16 @@ static void control_task(void *arg)
             if (xQueueSend(log_queue, &s, 0) != pdTRUE) {
                 g_log_queue_drops++;
             }
+        }
+
+        /* Rechenzeit eines Zyklus (ohne Warten auf den Gyro) */
+        const uint32_t used = micros() - t0;
+        if (used > t_max) t_max = used;
+        t_sum += used;
+        if (++t_n >= 1000) {
+            g_loop_us_max = t_max;
+            g_loop_us_avg_x10 = (t_sum * 10u) / t_n;
+            t_sum = t_n = t_max = 0;
         }
 
         watchdog_kick();
@@ -217,9 +263,12 @@ static void write_header(void)
         h.pid[a][1] = c->pid_i[a];
         h.pid[a][2] = c->pid_d[a];
     }
-    h.max_rate_dps = (uint16_t)c->max_rate_dps[AXIS_ROLL];
-    h.gyro_lpf_hz = (uint8_t)c->gyro_lpf_hz;
-    h.dterm_lpf_hz = (uint8_t)c->dterm_lpf_hz;
+    h.max_rate_dps = (uint16_t)c->rate_max[AXIS_ROLL];
+    h.gyro_lpf_hz = (uint8_t)c->gyro_lpf1_hz;
+    h.dterm_lpf_hz = (uint8_t)c->dterm_lpf1_hz;
+    for (int a = 0; a < 3; a++) h.ff[a] = c->pid_f[a];
+    h.flags = (uint8_t)((c->iterm_relax >= 1.0f ? 1u : 0u) | (c->tpa_rate > 0.0f ? 2u : 0u) |
+                        (c->runaway_prevention >= 0.5f ? 4u : 0u));
     uint8_t rec[LOGREC_SIZE];
     logrec_encode_header(&h, rec);
     bb_append(&g_blackbox, rec);
@@ -296,6 +345,11 @@ static void status_task(void *arg)
         led_set(0, led);
         led_set(1, g_flight.mode == MODE_ANGLE);
 
+        if (runaway_beep) {          /* Runaway-Schutz hat ausgeloest: langer Ton */
+            runaway_beep = false;
+            beep_request = false;
+            beep(1000);
+        }
         if (beep_request) {
             beep_request = false;
             beep(80);
@@ -361,9 +415,12 @@ int main(void)
     rx_uart_init(CRSF_BAUDRATE);
 
     /* Blackbox-Flash: Ende der bisherigen Daten suchen (wenige ms) */
+    flight_default_config(&boot_cfg);
     if (flash_init()) {
-        flash_ops.capacity = flash_capacity();
+        /* letzter 64-KB-Block: Einstellungen, davor: Flugdaten */
+        flash_ops.capacity = config_store_addr();
         bb_init(&g_blackbox, &flash_ops);
+        g_cfg_from_flash = config_store_load(&boot_cfg) > 0;
     }
 
     icm42688_drdy_callback = on_gyro_drdy;
