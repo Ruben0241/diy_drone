@@ -3,3 +3,7 @@ build-*/
 *.o
 .DS_Store
 .vscode/
+__pycache__/
+*.pyc
+logs/
+ergebnisse/
