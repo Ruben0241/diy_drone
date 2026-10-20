@@ -32,6 +32,20 @@ Gas leicht erhöhen. Jeden Motor einzeln kurz mit dem Finger antippen und prüfe
 Stimmt die Position nicht: in Betaflight wurde eventuell eine Motor-Neuzuordnung
 (`resource MOTOR`) verwendet. In `diff all` nachsehen.
 
+## 3b. Sensorrichtung ohne Motoren (über USB)
+
+Akku **ab**, nur USB. `python tools/fc_cli.py live` starten und die Drohne bewegen:
+
+| Bewegung | Erwartung in der Anzeige | Korrektur in `main.c`, falls falsch |
+|---|---|---|
+| rechte Seite nach unten kippen | `att r=` wird positiv, `gyro r=` beim Kippen positiv | `cfg.gyro_sign[AXIS_ROLL] = -1.0f;` |
+| Nase nach unten kippen | `att p=` wird positiv, `gyro p=` beim Kippen positiv | `cfg.gyro_sign[AXIS_PITCH] = -1.0f;` |
+| von oben gesehen gegen den Uhrzeigersinn drehen | `gyro y=` positiv | `cfg.gyro_sign[AXIS_YAW] = -1.0f;` |
+| Sticks bewegen (armed nicht nötig) | Roll rechts → `sp r=` positiv, Pitch vorne → `sp p=` positiv, **Yaw rechts → `sp y=` negativ** | `cfg.stick_sign[...]` umkehren |
+
+> Achtung: Die Lage (`att`) kann nur stimmen, wenn auch das Gyro-Vorzeichen stimmt.
+> Zuerst `gyro`, dann `att` prüfen. Danach folgt Schritt 4 mit Motoren als Gegenprobe.
+
 ## 4. Regelrichtung (wichtigster Test)
 
 Armed, Gas ca. 20 %, Drohne in der Hand. Schnell um eine Achse drehen und hören,
@@ -59,6 +73,11 @@ Danach dieselbe Prüfung mit den Sticks (Drohne still):
 Armed, Gas ca. 20 %: Fernsteuerung ausschalten → Motoren müssen **innerhalb von 0.25 s**
 stoppen. Fernsteuerung wieder ein → bleibt aus, bis der Arm-Schalter aus und wieder ein ist.
 
-## 6. Ergebnis ins Testprotokoll
+## 6. Logging
+
+Armen, 10 s laufen lassen, disarmen. `python tools/fc_cli.py dump --prefix test` →
+eine Datei `logs/test_B_01.csv` mit ca. 10 000 Zeilen muss entstehen. Danach `erase`.
+
+## 7. Ergebnis ins Testprotokoll
 
 Datum, Firmware-Version (Git-Commit), Ergebnis jeder Zeile, vorgenommene Korrekturen.

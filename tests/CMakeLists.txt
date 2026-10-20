@@ -6,7 +6,9 @@ set(CORE ${CMAKE_CURRENT_SOURCE_DIR}/../src/core)
 
 add_executable(test_core
     test_core.c
+    ${CORE}/blackbox.c
     ${CORE}/crsf.c
+    ${CORE}/logrec.c
     ${CORE}/dshot.c
     ${CORE}/flight.c
     ${CORE}/mahony.c
@@ -19,4 +21,4 @@ target_compile_options(test_core PRIVATE -Wall -Wextra -Werror)
 target_link_libraries(test_core m)
 
 enable_testing()
-add_test(NAME core COMMAND test_core)
+add_test(NAME core COMMAND test_core ${CMAKE_BINARY_DIR}/sample_log.bin)

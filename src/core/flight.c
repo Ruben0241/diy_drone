@@ -41,6 +41,9 @@ void flight_default_config(flight_config_t *c)
         c->gyro_sign[a] = 1.0f;
         c->stick_sign[a] = 1.0f;
     }
+    /* Koerpersystem z nach oben: positive Gierrate = gegen den Uhrzeigersinn (Nase links).
+     * Yaw-Stick rechts soll nach rechts drehen -> Vorzeichen umkehren (wie Betaflight rc.c) */
+    c->stick_sign[AXIS_YAW] = -1.0f;
     c->yaw_motors_reversed = false;
 
     c->gyro_cal_samples = 1000;       /* 1 s bei 1 kHz */
@@ -129,7 +132,7 @@ static void update_arming(flight_t *f, const flight_input_t *in, float throttle)
     if (!f->armed) {
         const bool level = fabsf(f->attitude_deg[0]) < f->cfg.arm_angle_max_deg &&
                            fabsf(f->attitude_deg[1]) < f->cfg.arm_angle_max_deg;
-        if (f->arm_switch_seen_off && f->calibrated && level &&
+        if (f->arm_switch_seen_off && f->calibrated && level && !in->arm_inhibit &&
             throttle < f->cfg.arm_throttle_max) {
             f->armed = true;
             f->event_armed = true;
@@ -137,6 +140,19 @@ static void update_arming(flight_t *f, const flight_input_t *in, float throttle)
                 pid_reset(&f->pid[a]);
             }
         }
+    }
+}
+
+void flight_force_disarm(flight_t *f)
+{
+    if (f->armed) {
+        f->event_disarmed = true;
+    }
+    f->armed = false;
+    f->arm_switch_seen_off = false;
+    for (int i = 0; i < MIXER_MOTOR_COUNT; i++) {
+        f->motor[i] = 0.0f;
+        f->dshot[i] = 0;
     }
 }
 

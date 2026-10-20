@@ -24,8 +24,9 @@ auf **derselben Hardware**. Dadurch unterscheidet sich im Vergleich nur die Soft
 | Rate- und Angle-Mode, Arming, Failsafe, Gyro-Kalibrierung | `src/core/flight.c` | fertig |
 | Watchdog, Fehler-Handler (Motoren aus) | `src/board/system.c`, `src/app/main.c` | fertig |
 | Akkuspannung, LEDs, Summer | `src/board/peripherals.c` | fertig, Werte prüfen |
-| **Logging in den 16-MB-Flash und Export als CSV** | `src/app/main.c` (`log_task`) | **offen** |
-| USB (Konfiguration, Log-Download) | – | offen |
+| Logging in den 16-MB-Flash (W25Q128, SPI2), 1 kHz, nur armed | `src/core/blackbox.c`, `src/core/logrec.c`, `src/board/flash_w25q.c` | fertig |
+| USB (virtueller COM-Port): info, live, dump, erase, dfu | `src/app/usb_cli.c` (TinyUSB) | fertig |
+| PC-Werkzeug: Download → CSV, Live-Anzeige, DFU | `tools/fc_cli.py`, `tools/analysis/buildb_log.py` | fertig |
 | Bidirektionales DShot / RPM-Filter | – | optional |
 
 ## Aufbau
@@ -35,9 +36,10 @@ src/core/    hardwareunabhängig, auf dem PC testbar (PID, Mahony, CRSF, Mischer
 src/board/   Register-Treiber für den GEPRC F722 (Pins in board.h)
 src/app/     FreeRTOS-Tasks (main.c) und FreeRTOSConfig.h
 tests/       Host-Tests der Kernmodule
-lib/         FreeRTOS-Kernel, CMSIS (Git-Submodule)
+lib/         FreeRTOS-Kernel, CMSIS, TinyUSB (Git-Submodule)
 docs/        Bodentest
-tools/analysis/  Python-Auswertung A/B (Sprungantwort, Kennzahlen, Vergleich)
+tools/fc_cli.py  USB-Werkzeug (Download, Löschen, Live, DFU)
+tools/analysis/  Python-Auswertung A/B (Sprungantwort, Kennzahlen, Vergleich), Log-Decoder
 ```
 
 ### Tasks (Begleitarbeit Kap. 2.4)
@@ -46,7 +48,9 @@ tools/analysis/  Python-Auswertung A/B (Sprungantwort, Kennzahlen, Vergleich)
 |---|---|---|---|
 | control | 4 | Gyro Data-Ready (1 kHz) | IMU lesen, Lage, PID, Mischer, DShot |
 | rx | 3 | 1 kHz | CRSF auswerten, Zeitstempel für Failsafe |
-| log | 2 | Queue | Messdaten (Flash folgt) |
+| log | 2 | Queue | Flugdaten in den Flash (nur armed) |
+| usbd | 2 | USB-Ereignisse | TinyUSB |
+| cli | 1 | Eingabe | Befehle über USB |
 | status | 1 | 10 Hz | LEDs, Summer, Akkuspannung |
 
 ### Pinbelegung
@@ -60,7 +64,8 @@ Quelle: Betaflight-Target `GEPRCF722` (`betaflight/config`, `configs/GEPR/GEPRCF
 | Motoren | M1 PB4, M2 PB5, M3 PB0, M4 PB1 (TIM3 CH1–4), DMA1 Stream 2 Kanal 5 |
 | Akkuspannung | PC0 (ADC1 IN10) |
 | LEDs / Summer | PA13, PA14 / PC13 |
-| Blackbox-Flash | W25Q128, SPI2, CS PB12 (noch ungenutzt) |
+| Blackbox-Flash | W25Q128, SPI2 (PB13/PB14/PB15), CS PB12 |
+| USB | PA11/PA12 (OTG_FS), Takt aus Quarz 8 MHz |
 
 ## Bauen
 
@@ -88,11 +93,33 @@ cmake -S . -B build && cmake --build build
 3. Betaflight Configurator → *Firmware Flasher* → *Load Firmware [Local]* → `build/firmware.hex` → *Flash Firmware*.
    Falls der Configurator die Datei ablehnt: STM32CubeProgrammer (USB/DFU) oder
    Alternativ im DFU-Modus: `dfu-util -a 0 -s 0x08000000:leave -D build/firmware.bin`
-4. Diese Firmware hat **kein USB**. Für das nächste Flashen die Boot-Taste gedrückt halten
-   und dann USB einstecken (DFU-Modus) **[prüfen: Lage der Boot-Taste am Board]**.
+4. Nächstes Mal ohne Boot-Taste: `python tools/fc_cli.py dfu` startet den Bootloader,
+   danach wie oben flashen. Falls die Firmware nicht startet: Boot-Taste gedrückt halten
+   und USB einstecken **[prüfen: Lage der Boot-Taste am Board]**.
 
 **Zurück zu Betaflight:** Firmware Flasher → Board `GEPRCF722` → Flashen → im CLI die
 gespeicherte `diff all` einfügen → `save`.
+
+## Flugdaten herunterladen (Build B)
+
+```bash
+pip install -r tools/requirements.txt
+python tools/fc_cli.py info                      # Belegung des Flash
+python tools/fc_cli.py dump --prefix 20261102    # -> logs/20261102_B_01.csv, _02.csv, ... + .json
+python tools/fc_cli.py erase                     # erst nach erfolgreichem dump!
+python tools/analysis/fc_analysis.py --a flugA.csv --b logs/20261102_B_01.csv --out ergebnisse
+```
+
+- Aufgezeichnet wird nur **armed** (Kopfsatz mit Firmware-Version und PID-Werten pro Flug),
+  mit 1 kHz, 32 Byte pro Zyklus → 16 MB reichen für **ca. 8.7 min** Flugzeit.
+  Ist der Speicher voll, piepst es beim Armen 3×; geflogen werden kann trotzdem.
+- Pro Flug entstehen eine CSV (Spalten wie `tools/analysis` erwartet) und eine JSON-Datei
+  mit den Einstellungen. Die Rohdaten werden zusätzlich als `.bin` gesichert.
+- Während `dump` und `erase` ist Armen gesperrt; im armed-Zustand verweigert die Firmware beides.
+- `python tools/fc_cli.py live` zeigt Lage, Gyro, Sticks und Akku 20× pro Sekunde
+  (hilfreich für den Bodentest, ganz ohne Motoren).
+
+Format der Datensätze: `src/core/logrec.h`.
 
 ## Einstellungen
 
@@ -106,6 +133,7 @@ Alle Standardwerte stehen in `flight_default_config()` (`src/core/flight.c`).
 | Gyro-Tiefpass / D-Tiefpass | 150 Hz / 75 Hz | PT1 |
 | Leerlauf | 5.5 % | wie Betaflight `dshot_idle_value` |
 | Failsafe | 250 ms ohne Paket | Motoren sofort aus |
+| Log-Rate | 1 kHz (`LOG_DIVIDER` in `main.c`) | gleich wie Build A einstellen |
 | Kanäle | 1 Roll, 2 Pitch, 3 Gas, 4 Yaw, 5 Arm, 6 Angle-Mode | ELRS/EdgeTX «AETR» |
 
 **Unterschiede zu Betaflight** (wichtig für die Diskussion in der Arbeit): kein Feedforward,
@@ -117,7 +145,9 @@ Regelfrequenz 1 kHz statt 4–8 kHz.
 - Erste Tests ohne Propeller, danach gefesselt (Kap. 3.4.7).
 - Arming nur mit Gas unten, Schalter-Wechsel aus → ein, Drohne flach (< 25°) und Gyro kalibriert.
 - Failsafe, Gyro-Ausfall, Absturz der Software (HardFault, Assert, Stack-Überlauf) und Watchdog
-  schalten die Motoren aus.
+  schalten die Motoren aus. Nach einem Gyro-Ausfall muss der Arm-Schalter neu betätigt werden.
+- Piepsen beim Start: 2× = Quarz nicht angelaufen (USB unzuverlässig), 4× = kein Flash gefunden,
+  dauernd kurz alle 0.5 s = Gyro nicht gefunden oder Software-Fehler.
 
 ## Hinweis zur Eigenleistung
 
@@ -126,6 +156,7 @@ Das ist in der Redlichkeitserklärung der Maturaarbeit zu deklarieren.
 
 ## Lizenzen
 
-FreeRTOS-Kernel: MIT. CMSIS (Arm / STMicroelectronics): Apache-2.0.
+FreeRTOS-Kernel: MIT. TinyUSB: MIT. CMSIS (Arm / STMicroelectronics): Apache-2.0.
+USB-ID 1209:0001 ist die Test-ID von pid.codes (nur für Prototypen).
 Eigener Code: **[Lizenz festlegen]**. Betaflight (GPL-3.0) diente nur als Referenz: übernommen wurden Zahlenwerte
 (Pinbelegung, Registerwerte, Mischertabelle, PID-Skalierungsfaktoren), kein Programmcode.

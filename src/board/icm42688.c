@@ -1,6 +1,7 @@
 #include "icm42688.h"
 #include "board.h"
 #include "system.h"
+#include "spi.h"
 
 /* Register (Bank 0, sofern nicht anders vermerkt) */
 #define REG_DEVICE_CONFIG      0x11
@@ -36,22 +37,9 @@ void (*icm42688_drdy_callback)(void) = 0;
 static inline void cs_low(void)  { gpio_write(GYRO_CS_PORT, GYRO_CS_PIN, false); }
 static inline void cs_high(void) { gpio_write(GYRO_CS_PORT, GYRO_CS_PIN, true); }
 
-static uint8_t spi_xfer(uint8_t out)
-{
-    while (!(GYRO_SPI->SR & SPI_SR_TXE)) { }
-    *(volatile uint8_t *)&GYRO_SPI->DR = out;     /* 8-Bit-Zugriff, sonst 16 Bit */
-    while (!(GYRO_SPI->SR & SPI_SR_RXNE)) { }
-    return *(volatile uint8_t *)&GYRO_SPI->DR;
-}
+static uint8_t spi_xfer_gyro(uint8_t out) { return spi_xfer(GYRO_SPI, out); }
 
-static void spi_set_prescaler(uint32_t br_bits)
-{
-    GYRO_SPI->CR1 &= ~SPI_CR1_SPE;
-    GYRO_SPI->CR1 = (GYRO_SPI->CR1 & ~SPI_CR1_BR) | (br_bits << SPI_CR1_BR_Pos);
-    GYRO_SPI->CR1 |= SPI_CR1_SPE;
-}
-
-static void spi_init(void)
+static void gyro_spi_init(void)
 {
     RCC->APB1ENR |= RCC_APB1ENR_SPI3EN;
     (void)RCC->APB1ENR;
@@ -66,18 +54,15 @@ static void spi_init(void)
     gpio_config(GYRO2_CS_PORT, GYRO2_CS_PIN, GPIO_OUT, 0, GPIO_NOPULL, false);
     gpio_write(GYRO2_CS_PORT, GYRO2_CS_PIN, true);
 
-    /* Master, SPI-Mode 3 (CPOL=1, CPHA=1), Software-CS, 8 Bit */
-    GYRO_SPI->CR1 = SPI_CR1_MSTR | SPI_CR1_SSM | SPI_CR1_SSI | SPI_CR1_CPOL | SPI_CR1_CPHA |
-                    (6u << SPI_CR1_BR_Pos);                    /* 54 MHz / 128 = 422 kHz */
-    GYRO_SPI->CR2 = (7u << SPI_CR2_DS_Pos) | SPI_CR2_FRXTH;   /* 8 Bit, RXNE bei 8 Bit */
-    GYRO_SPI->CR1 |= SPI_CR1_SPE;
+    /* SPI-Mode 3, langsam fuer die Konfiguration: 54 MHz / 128 = 422 kHz */
+    spi_init(GYRO_SPI, 6, true);
 }
 
 static void write_reg(uint8_t reg, uint8_t value)
 {
     cs_low();
-    spi_xfer(reg & 0x7F);
-    spi_xfer(value);
+    spi_xfer_gyro(reg & 0x7F);
+    spi_xfer_gyro(value);
     cs_high();
     delay_us(10);
 }
@@ -85,8 +70,8 @@ static void write_reg(uint8_t reg, uint8_t value)
 static uint8_t read_reg(uint8_t reg)
 {
     cs_low();
-    spi_xfer(reg | 0x80);
-    const uint8_t v = spi_xfer(0);
+    spi_xfer_gyro(reg | 0x80);
+    const uint8_t v = spi_xfer_gyro(0);
     cs_high();
     return v;
 }
@@ -94,8 +79,8 @@ static uint8_t read_reg(uint8_t reg)
 static void read_burst(uint8_t reg, uint8_t *buf, uint32_t len)
 {
     cs_low();
-    spi_xfer(reg | 0x80);
-    for (uint32_t i = 0; i < len; i++) buf[i] = spi_xfer(0);
+    spi_xfer_gyro(reg | 0x80);
+    for (uint32_t i = 0; i < len; i++) buf[i] = spi_xfer_gyro(0);
     cs_high();
 }
 
@@ -135,7 +120,7 @@ uint8_t icm42688_whoami(void)
 
 bool icm42688_init(icm_odr_t odr)
 {
-    spi_init();
+    gyro_spi_init();
     delay_ms(10);
 
     set_bank(0);
@@ -189,7 +174,7 @@ bool icm42688_init(icm_odr_t odr)
     delay_ms(15);
 
     /* Ab jetzt schnell auslesen: 54 MHz / 4 = 13.5 MHz (max. 24 MHz) */
-    spi_set_prescaler(1);
+    spi_set_prescaler(GYRO_SPI, 1);
 
     drdy_irq_init();
     return true;

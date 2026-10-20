@@ -7,3 +7,6 @@
 [submodule "lib/cmsis_core"]
 	path = lib/cmsis_core
 	url = https://github.com/STMicroelectronics/cmsis_core.git
+[submodule "lib/tinyusb"]
+	path = lib/tinyusb
+	url = https://github.com/hathach/tinyusb.git

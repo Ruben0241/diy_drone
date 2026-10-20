@@ -7,7 +7,9 @@
 #include <stdio.h>
 #include <string.h>
 
+#include "blackbox.h"
 #include "crsf.h"
+#include "logrec.h"
 #include "dshot.h"
 #include "flight.h"
 #include "mahony.h"
@@ -247,6 +249,31 @@ static void test_flight(void)
     CHECK(f.motor[1] > f.motor[0] && f.motor[3] > f.motor[2]);
     in.gyro_dps[AXIS_PITCH] = 0.0f;
 
+    /* Yaw-Stick rechts -> Soll-Gierrate negativ (im Uhrzeigersinn). Dafuer muessen die
+       gegen den Uhrzeigersinn drehenden Propeller (Betaflight "props in": M2, M3) schneller werden */
+    pid_reset(&f.pid[AXIS_YAW]);
+    set_sticks(&in, 1200, CRSF_CHANNEL_MAX);
+    in.channels[CH_YAW] = 1500;
+    run(&f, &in, 20);
+    CHECK(f.setpoint[AXIS_YAW] < -100.0f);
+    CHECK(f.motor[1] > f.motor[0] && f.motor[2] > f.motor[3]);
+    /* Roll-Stick rechts -> Soll positiv, linke Motoren (M3, M4) schneller */
+    pid_reset(&f.pid[AXIS_YAW]);
+    set_sticks(&in, 1200, CRSF_CHANNEL_MAX);
+    in.channels[CH_ROLL] = 1500;
+    run(&f, &in, 20);
+    CHECK(f.setpoint[AXIS_ROLL] > 100.0f);
+    CHECK(f.motor[2] > f.motor[0] && f.motor[3] > f.motor[1]);
+    /* Pitch-Stick vorne -> Soll positiv (Nase runter), hintere Motoren (M1, M3) schneller */
+    pid_reset(&f.pid[AXIS_ROLL]);
+    set_sticks(&in, 1200, CRSF_CHANNEL_MAX);
+    in.channels[CH_PITCH] = 1500;
+    run(&f, &in, 20);
+    CHECK(f.setpoint[AXIS_PITCH] > 100.0f);
+    CHECK(f.motor[0] > f.motor[1] && f.motor[2] > f.motor[3]);
+    set_sticks(&in, 1200, CRSF_CHANNEL_MAX);
+    for (int a = 0; a < 3; a++) pid_reset(&f.pid[a]);
+
     /* Failsafe: keine Pakete -> sofort aus */
     in.rc_valid = false;
     run(&f, &in, 1);
@@ -273,9 +300,170 @@ static void test_flight(void)
         flight_step(&f, &in);
     }
     CHECK(!f.calibrated);
+
+    /* Arm-Sperre (USB-Download): Schalterwechsel armt nicht */
+    flight_init(&f, &cfg);
+    memset(&in, 0, sizeof(in));
+    in.acc_g[2] = 1.0f;
+    in.rc_valid = true;
+    set_sticks(&in, CRSF_CHANNEL_MIN, CRSF_CHANNEL_MIN);
+    run(&f, &in, 1500);
+    in.arm_inhibit = true;
+    set_sticks(&in, CRSF_CHANNEL_MIN, CRSF_CHANNEL_MAX);
+    run(&f, &in, 10);
+    CHECK(!f.armed);
+
+    /* Zwangs-Disarm (Gyro-Ausfall): bleibt aus, bis der Schalter neu betaetigt wird */
+    in.arm_inhibit = false;
+    set_sticks(&in, CRSF_CHANNEL_MIN, CRSF_CHANNEL_MIN);
+    run(&f, &in, 5);
+    set_sticks(&in, CRSF_CHANNEL_MIN, CRSF_CHANNEL_MAX);
+    run(&f, &in, 5);
+    CHECK(f.armed);
+    flight_force_disarm(&f);
+    CHECK(!f.armed && f.dshot[0] == 0);
+    run(&f, &in, 50);
+    CHECK(!f.armed);
+    set_sticks(&in, CRSF_CHANNEL_MIN, CRSF_CHANNEL_MIN);
+    run(&f, &in, 5);
+    set_sticks(&in, CRSF_CHANNEL_MIN, CRSF_CHANNEL_MAX);
+    run(&f, &in, 5);
+    CHECK(f.armed);
 }
 
-int main(void)
+/* ---------- Logformat ---------- */
+
+static void test_logrec(const char *sample_path)
+{
+    printf("Logformat\n");
+    logrec_data_t d;
+    memset(&d, 0, sizeof(d));
+    d.t_us = 0x01020304u;
+    d.flags = LOGREC_FLAG_ARMED | LOGREC_FLAG_ANGLE;
+    d.setpoint_dps[0] = 123.45f; d.setpoint_dps[1] = -200.0f; d.setpoint_dps[2] = 5000.0f;
+    d.gyro_dps[0] = -0.04f; d.gyro_dps[1] = 1.0f; d.gyro_dps[2] = -3276.8f;
+    d.motor[0] = 48; d.motor[1] = 1000; d.motor[2] = 2047; d.motor[3] = 0;
+    d.throttle = 0.4321f; d.vbat_v = 15.12f; d.link_quality = 99;
+
+    uint8_t r[LOGREC_SIZE];
+    logrec_encode_data(&d, r);
+    CHECK(r[0] == LOGREC_TYPE_DATA);
+    CHECK(r[1] == 0x05);
+    CHECK(r[2] == 0x04 && r[5] == 0x01);
+    CHECK((int16_t)(r[6] | (r[7] << 8)) == 1235);     /* 123.45 dps -> 1235 */
+    CHECK((int16_t)(r[8] | (r[9] << 8)) == -2000);
+    CHECK((int16_t)(r[10] | (r[11] << 8)) == 32767);  /* begrenzt */
+    CHECK((int16_t)(r[12] | (r[13] << 8)) == 0);
+    CHECK((int16_t)(r[16] | (r[17] << 8)) == -32768);
+    CHECK((r[22] | (r[23] << 8)) == 2047);
+    CHECK((r[26] | (r[27] << 8)) == 4321);
+    CHECK((r[28] | (r[29] << 8)) == 15120);
+    CHECK(r[30] == 99);
+    CHECK(logrec_crc_ok(r));
+    r[10] ^= 1;
+    CHECK(!logrec_crc_ok(r));
+
+    logrec_header_t h = { .git_hash = 0xDEADBEEFu, .loop_hz = 1000, .log_hz = 1000,
+        .pid = { {45, 80, 30}, {47, 84, 34}, {45, 80, 0} },
+        .max_rate_dps = 400, .gyro_lpf_hz = 150, .dterm_lpf_hz = 75 };
+    logrec_encode_header(&h, r);
+    CHECK(r[0] == LOGREC_TYPE_HEADER && r[1] == LOGREC_VERSION);
+    CHECK(r[2] == 0xEF && r[5] == 0xDE);
+    CHECK(r[10] == 45 && r[13] == 47 && r[18] == 0);
+    CHECK(logrec_crc_ok(r));
+
+    /* Beispieldatei fuer den Python-Test (Kopf + 20 Datensaetze + Fuellung) */
+    if (sample_path) {
+        FILE *fp = fopen(sample_path, "wb");
+        if (fp) {
+            logrec_encode_header(&h, r);
+            fwrite(r, 1, LOGREC_SIZE, fp);
+            for (int i = 0; i < 20; i++) {
+                d.t_us = 1000000u + (uint32_t)i * 1000u;
+                d.setpoint_dps[0] = (float)i * 10.0f;
+                d.gyro_dps[0] = (float)i * 9.5f;
+                d.setpoint_dps[2] = 0.0f; d.gyro_dps[2] = 0.0f;
+                logrec_encode_data(&d, r);
+                fwrite(r, 1, LOGREC_SIZE, fp);
+            }
+            logrec_encode_pad(r);
+            for (int i = 0; i < 3; i++) fwrite(r, 1, LOGREC_SIZE, fp);
+            fclose(fp);
+        }
+    }
+}
+
+/* ---------- Blackbox mit simuliertem Flash ---------- */
+
+#define SIM_CAP (4u * BB_BLOCK_SIZE)
+static uint8_t sim[SIM_CAP];
+static int sim_programs, sim_bad_program;
+
+static bool sim_read(uint32_t a, uint8_t *b, uint32_t n) { memcpy(b, &sim[a], n); return a + n <= SIM_CAP; }
+static bool sim_prog(uint32_t a, const uint8_t *b)
+{
+    sim_programs++;
+    for (uint32_t i = 0; i < BB_PAGE_SIZE; i++) {
+        if ((sim[a + i] & b[i]) != b[i]) sim_bad_program++;  /* NOR: nur 1 -> 0 */
+        sim[a + i] &= b[i];
+    }
+    return true;
+}
+static bool sim_erase_block(uint32_t a) { memset(&sim[a], 0xFF, BB_BLOCK_SIZE); return true; }
+static bool sim_erase_chip(void) { memset(sim, 0xFF, SIM_CAP); return true; }
+static const bb_flash_ops_t sim_ops = { sim_read, sim_prog, sim_erase_block, sim_erase_chip, SIM_CAP };
+
+static void test_blackbox(void)
+{
+    printf("Blackbox\n");
+    blackbox_t bb;
+    uint8_t rec[LOGREC_SIZE];
+    logrec_data_t d;
+    memset(&d, 0, sizeof(d));
+
+    memset(sim, 0xFF, sizeof(sim));
+    CHECK(bb_init(&bb, &sim_ops));
+    CHECK(bb_used_bytes(&bb) == 0 && !bb.full);
+
+    /* 20 Datensaetze = 2.5 Seiten; nach flush 3 Seiten */
+    for (int i = 0; i < 20; i++) { d.t_us = (uint32_t)i; logrec_encode_data(&d, rec); bb_append(&bb, rec); }
+    CHECK(bb_used_bytes(&bb) == 2 * BB_PAGE_SIZE);
+    bb_flush(&bb);
+    CHECK(bb_used_bytes(&bb) == 3 * BB_PAGE_SIZE);
+    CHECK(sim[2 * BB_PAGE_SIZE + 4 * LOGREC_SIZE] == LOGREC_TYPE_PAD);
+    bb_flush(&bb);                                   /* leerer Puffer: nichts schreiben */
+    CHECK(bb_used_bytes(&bb) == 3 * BB_PAGE_SIZE);
+
+    /* Neustart: Ende wird wiedergefunden */
+    blackbox_t bb2;
+    CHECK(bb_init(&bb2, &sim_ops));
+    CHECK(bb_used_bytes(&bb2) == 3 * BB_PAGE_SIZE);
+
+    /* teilweise beschriebene Seite (Stromausfall) wird uebersprungen */
+    sim[3 * BB_PAGE_SIZE + 100] = 0x12;
+    CHECK(bb_init(&bb2, &sim_ops));
+    CHECK(bb_used_bytes(&bb2) == 4 * BB_PAGE_SIZE);
+
+    /* Flash fuellen: danach voll, weitere Saetze werden verworfen */
+    for (uint32_t i = 0; i < SIM_CAP / LOGREC_SIZE; i++) { logrec_encode_data(&d, rec); bb_append(&bb2, rec); }
+    CHECK(bb2.full);
+    CHECK(bb2.records_dropped > 0);
+    CHECK(bb_used_bytes(&bb2) <= SIM_CAP);
+    CHECK(sim_bad_program == 0);
+
+    /* Loeschen des benutzten Bereichs */
+    CHECK(bb_erase_used(&bb2, NULL));
+    CHECK(bb_used_bytes(&bb2) == 0 && !bb2.full);
+    CHECK(bb_init(&bb2, &sim_ops));
+    CHECK(bb_used_bytes(&bb2) == 0);
+
+    /* Voller Flash wird beim Start erkannt */
+    memset(sim, 0xA5, sizeof(sim));
+    CHECK(bb_init(&bb2, &sim_ops));
+    CHECK(bb2.full);
+}
+
+int main(int argc, char **argv)
 {
     test_crsf();
     test_dshot();
@@ -283,6 +471,8 @@ int main(void)
     test_mixer();
     test_mahony();
     test_flight();
+    test_logrec(argc > 1 ? argv[1] : NULL);
+    test_blackbox();
     printf("\n%d Pruefungen, %d Fehler\n", checks, failures);
     return failures ? 1 : 0;
 }

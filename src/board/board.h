@@ -10,9 +10,10 @@
  *   Empfaenger (CRSF)  UART2: TX PA2, RX PA3  [pruefen: an welchem UART haengt der RP3?]
  *   Motoren (DShot)    M1 PB4 TIM3_CH1, M2 PB5 TIM3_CH2, M3 PB0 TIM3_CH3, M4 PB1 TIM3_CH4
  *                      DMA-Burst ueber TIM3_UP: DMA1 Stream 2, Kanal 5
- *   Blackbox-Flash     W25Q128 an SPI2, CS PB12 (noch nicht verwendet)
+ *   Blackbox-Flash     W25Q128 an SPI2 (SCK PB13, MISO PB14, MOSI PB15), CS PB12
  *   OSD MAX7456        SPI1, CS PB2 (nicht verwendet, abgewaehlt)
  *   Akkuspannung       PC0 = ADC1 Kanal 10
+ *   USB                PA11/PA12 (OTG_FS), VBUS-Erkennung abgeschaltet
  *   LEDs               PA13, PA14 (dadurch kein SWD, Flashen nur per DFU)
  *   Summer             PC13 (invertiert)
  */
@@ -20,6 +21,7 @@
 
 #include "stm32f7xx.h"
 
+#define HSE_MHZ         8u           /* Quarz; Betaflight nimmt auf dem F7 ebenfalls 8 MHz an */
 #define SYSCLK_HZ       216000000u
 #define APB1_HZ          54000000u
 #define APB2_HZ         108000000u

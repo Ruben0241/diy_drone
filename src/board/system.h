@@ -10,7 +10,9 @@
 typedef enum { GPIO_IN = 0, GPIO_OUT = 1, GPIO_AF = 2, GPIO_ANALOG = 3 } gpio_mode_t;
 typedef enum { GPIO_NOPULL = 0, GPIO_PULLUP = 1, GPIO_PULLDOWN = 2 } gpio_pull_t;
 
-void     system_clock_init(void);       /* HSI 16 MHz -> PLL -> 216 MHz */
+void     system_clock_init(void);       /* Quarz 8 MHz (sonst HSI) -> PLL -> 216 MHz, USB 48 MHz */
+bool     system_clock_is_hse(void);     /* false = Quarz nicht angelaufen, USB unzuverlaessig */
+void     system_reboot(bool to_bootloader);
 void     system_timer_init(void);       /* DWT-Zykluszaehler fuer Mikrosekunden */
 uint32_t micros(void);
 void     delay_us(uint32_t us);

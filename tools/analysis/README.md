@@ -15,9 +15,10 @@ pip install -r tools/analysis/requirements.txt
    mit `blackbox_decode` (betaflight/blackbox-tools) in CSV umwandeln:
    `blackbox_decode LOG00001.BFL` → `LOG00001.01.csv`
    Benötigt ein Log aus Betaflight ≥ 4.0 (Spalten `setpoint[0..2]`).
-2. **Build B:** CSV der eigenen Firmware mit den Spalten
-   `t_us, sp_roll, sp_pitch, sp_yaw, gyro_roll, gyro_pitch, gyro_yaw, throttle, m1, m2, m3, m4, flags`
-   (Logging in der Firmware ist noch offen).
+2. **Build B:** `python tools/fc_cli.py dump --prefix JJJJMMTT` lädt alle Flüge über USB
+   und schreibt pro Flug eine CSV mit den Spalten
+   `t_us, sp_roll, sp_pitch, sp_yaw, gyro_roll, gyro_pitch, gyro_yaw, throttle, m1..m4, flags, vbat, lq`.
+   Eine vorhandene `.bin` lässt sich mit `python tools/analysis/buildb_log.py datei.bin` umwandeln.
 3. Auswerten:
 
 ```bash
@@ -53,4 +54,4 @@ weil das im Test den Fehler beim Endwert von −2.4 % auf unter 0.1 % senkte.
 | Ausregelzeit (±5 %) | 70 ms | 72 ms |
 | bleibende Abweichung | 0 % | −0.05 % |
 
-Tests: `python tools/analysis/test_fc_analysis.py`
+Tests: `python tools/analysis/test_fc_analysis.py` und `python tools/analysis/test_buildb_log.py`

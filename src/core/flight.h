@@ -54,6 +54,7 @@ typedef struct {
     float    acc_g[3];
     uint16_t channels[CRSF_NUM_CHANNELS];
     bool     rc_valid;               /* aktuelles Paket innerhalb des Timeouts */
+    bool     arm_inhibit;            /* z. B. waehrend Log-Download/Loeschen ueber USB */
 } flight_input_t;
 
 typedef struct {
@@ -91,3 +92,5 @@ typedef struct {
 void flight_default_config(flight_config_t *cfg);
 void flight_init(flight_t *f, const flight_config_t *cfg);
 void flight_step(flight_t *f, const flight_input_t *in);
+/* Sofort disarmen (z. B. Gyro-Ausfall). Neues Armen erst nach Schalter aus -> ein. */
+void flight_force_disarm(flight_t *f);
