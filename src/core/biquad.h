@@ -35,3 +35,4 @@ typedef struct {
 
 void  lpf_stage_init(lpf_stage_t *s, int type, float fc_hz, float fs_hz);
 float lpf_stage_apply(lpf_stage_t *s, float x);
+void  lpf_stage_reset(lpf_stage_t *s);

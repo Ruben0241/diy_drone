@@ -14,12 +14,17 @@ auf **derselben Hardware**. Dadurch unterscheidet sich im Vergleich nur die Soft
 
 | Modul | Datei | Stand |
 |---|---|---|
-| Takt 216 MHz (HSI → PLL, Over-Drive) | `src/board/system.c` | fertig |
+| Takt 216 MHz (Quarz 8 MHz → PLL, Over-Drive; Notbetrieb mit HSI) | `src/board/system.c` | fertig |
 | ICM-42688-P über SPI3, 1 kHz, Data-Ready-Interrupt | `src/board/icm42688.c` | fertig |
 | CRSF-Empfang über UART2 (420 000 Baud) | `src/board/rx_uart.c`, `src/core/crsf.c` | fertig |
 | DShot300 auf 4 Motoren (TIM3 + DMA-Burst) | `src/board/dshot_tim3.c`, `src/core/dshot.c` | fertig |
 | Lageschätzung Mahony | `src/core/mahony.c` | fertig |
-| PID je Achse (Betaflight-Skalierung, D auf Istwert, Anti-Windup) | `src/core/pid.c` | fertig |
+| PID je Achse (Betaflight-Skalierung, D auf Istwert, Feedforward, I-Term-Relax, Anti-Windup, TPA) | `src/core/pid.c` | fertig |
+| Filter: PT1, Biquad-Tiefpass, Notch | `src/core/biquad.c`, `src/core/pt1.c` | fertig |
+| Stick-Kennlinie (Betaflight «Actual Rates») | `src/core/rates.c` | fertig |
+| Airmode, Runaway-Schutz, Motortest, ACC-Kalibrierung | `src/core/flight.c` | fertig |
+| Einstellungen im Flash (Text + CRC), Befehle get/set/save/diff | `src/core/params.c`, `src/app/config_store.c` | fertig |
+| Simulation: Firmware-Kern im Physikmodell | `tools/sim` ([README](tools/sim/README.md)) | fertig |
 | Quad-X-Mischer mit Desaturierung | `src/core/mixer.c` | fertig |
 | Rate- und Angle-Mode, Arming, Failsafe, Gyro-Kalibrierung | `src/core/flight.c` | fertig |
 | Watchdog, Fehler-Handler (Motoren aus) | `src/board/system.c`, `src/app/main.c` | fertig |
@@ -40,6 +45,8 @@ lib/         FreeRTOS-Kernel, CMSIS, TinyUSB (Git-Submodule)
 docs/        Bodentest
 tools/fc_cli.py  USB-Werkzeug (Download, Löschen, Live, DFU)
 tools/analysis/  Python-Auswertung A/B (Sprungantwort, Kennzahlen, Vergleich), Log-Decoder
+tools/sim/       Simulation (Software-in-the-Loop) und Aliasing-Demo
+docs/            Bodentest, Abgleich mit Betaflight/INAV/PX4/dRehmFlight
 ```
 
 ### Tasks (Begleitarbeit Kap. 2.4)
@@ -123,22 +130,38 @@ Format der Datensätze: `src/core/logrec.h`.
 
 ## Einstellungen
 
-Alle Standardwerte stehen in `flight_default_config()` (`src/core/flight.c`).
-Überschreiben in `control_task()` in `src/app/main.c`.
+Standardwerte in `flight_default_config()` (`src/core/flight.c`), Namen wie in Betaflight
+(Liste: `src/core/params.c`). Ändern **ohne neu zu kompilieren** über USB:
+
+```
+python tools/fc_cli.py term
+> get pid          # alle Einstellungen, die mit "pid" beginnen (leer: alle)
+> set p_roll 50
+> diff             # nur Abweichungen vom Standard
+> save             # in den Flash (letzte 64 KB), nur disarmed
+> defaults         # zurück auf Standard (danach save)
+```
 
 | Parameter | Standard | Bemerkung |
 |---|---|---|
-| PID Roll / Pitch / Yaw | 45/80/30, 47/84/34, 45/80/0 | Betaflight-Standardwerte, gleiche Skalierung |
-| Max. Drehrate | 400 °/s, linear | wie in Kap. 3.4 vorgeschlagen; in Betaflight gleich einstellen |
-| Gyro-Tiefpass / D-Tiefpass | 150 Hz / 75 Hz | PT1 |
-| Leerlauf | 5.5 % | wie Betaflight `dshot_idle_value` |
+| `p/i/d/f_roll` usw. | 45/80/30/0, 47/84/34/0, 45/80/0/0 | Betaflight-Werte, gleiche Skalierung; F aus |
+| `iterm_relax`, `tpa_rate` | aus | Betaflight-Standard: an; für Vergleich 1 aus |
+| `iterm_windup` | 80 % | I-Grenze 400 (Roll/Pitch), 320 (Yaw) wie Betaflight |
+| `roll_center` / `roll_max` / `roll_expo` | 400 / 400 °/s / 0 | linear, wie Kap. 3.4 |
+| `gyro_lpf1_hz` / `dterm_lpf1_hz` / `dterm_lpf2_hz` | 150 / 75 / 150 Hz | PT1, statisch |
+| `yaw_lowpass_hz` | 100 Hz | wie Betaflight |
+| `motor_idle` | 5.5 % | wie Betaflight `motor_idle` 550 |
+| `airmode_start` | 25 % | wie Betaflight |
+| `runaway_prevention` | an | Werte aus Betaflight `core.c` |
+| `gyro_sign_*`, `stick_sign_*` | +1 (Yaw-Stick −1) | Korrektur nach Bodentest |
 | Failsafe | 250 ms ohne Paket | Motoren sofort aus |
-| Log-Rate | 1 kHz (`LOG_DIVIDER` in `main.c`) | gleich wie Build A einstellen |
 | Kanäle | 1 Roll, 2 Pitch, 3 Gas, 4 Yaw, 5 Arm, 6 Angle-Mode | ELRS/EdgeTX «AETR» |
 
-**Unterschiede zu Betaflight** (wichtig für die Diskussion in der Arbeit): kein Feedforward,
-keine dynamischen Notch-/RPM-Filter, kein TPA, keine Anti-Gravity, keine I-Term-Relax,
-Regelfrequenz 1 kHz statt 4–8 kHz.
+Weitere Befehle: `motor 1 10` (Motor 1 mit 10 %, nur disarmed, Propeller ab!), `motor stop`,
+`acccal` (Drohne waagrecht hinstellen).
+
+**Unterschiede zu Betaflight** und was bewusst fehlt: [docs/vergleich_software.md](docs/vergleich_software.md)
+(dort auch die CLI-Liste, um Betaflight für den Vergleich auf «reinen PID» zu stellen).
 
 ## Sicherheit
 

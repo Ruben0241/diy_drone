@@ -38,6 +38,7 @@ typedef struct {
     int   dterm_lpf1_type; float dterm_lpf1_hz;
     int   dterm_lpf2_type; float dterm_lpf2_hz;
     float ff_lpf_hz;                       /* Glaettung des Feedforward (0 = aus) */
+    float p_lpf_hz;                        /* PT1 auf den P-Anteil (Betaflight nur Yaw: 100 Hz; 0 = aus) */
     bool  iterm_relax;
     float iterm_relax_hz;                  /* Betaflight: 15 Hz */
 } pid_params_t;
@@ -57,7 +58,8 @@ typedef struct {
     float prev_measurement, prev_setpoint;
     bool  has_prev;
     lpf_stage_t dterm1, dterm2;
-    pt1_t ff_lpf, relax_lpf;
+    pt1_t ff_lpf, relax_lpf, p_lpf;
+    bool  p_lpf_on;
 
     /* letzte Werte (Logging, Anzeige, Runaway-Erkennung) */
     float p, i, d, f;

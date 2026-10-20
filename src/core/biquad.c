@@ -61,3 +61,9 @@ float lpf_stage_apply(lpf_stage_t *s, float x)
     default:            return x;
     }
 }
+
+void lpf_stage_reset(lpf_stage_t *s)
+{
+    if (s->type == FILTER_PT1) pt1_reset(&s->pt1, 0.0f);
+    else if (s->type == FILTER_BIQUAD) biquad_reset(&s->bq);
+}

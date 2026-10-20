@@ -20,7 +20,9 @@
 
 ## 3. Motor-Reihenfolge und Drehrichtung
 
-Gas leicht erhöhen. Jeden Motor einzeln kurz mit dem Finger antippen und prüfen:
+Disarmed, **Propeller ab**, Akku am Smoke Stopper, USB verbunden: `python tools/fc_cli.py term`,
+dann nacheinander `motor 1 8`, `motor 2 8`, `motor 3 8`, `motor 4 8` (8 % Gas, stoppt nach 3 s von selbst; sofort aus: `motor stop`).
+Prüfen, welcher Motor dreht und in welche Richtung (Klebeband-Fähnchen auf der Glocke):
 
 | Motor | Position | Drehrichtung (Betaflight-Standard «Props in») |
 |---|---|---|
@@ -36,12 +38,12 @@ Stimmt die Position nicht: in Betaflight wurde eventuell eine Motor-Neuzuordnung
 
 Akku **ab**, nur USB. `python tools/fc_cli.py live` starten und die Drohne bewegen:
 
-| Bewegung | Erwartung in der Anzeige | Korrektur in `main.c`, falls falsch |
+| Bewegung | Erwartung in der Anzeige | Korrektur (in `fc_cli.py term`), falls falsch |
 |---|---|---|
-| rechte Seite nach unten kippen | `att r=` wird positiv, `gyro r=` beim Kippen positiv | `cfg.gyro_sign[AXIS_ROLL] = -1.0f;` |
-| Nase nach unten kippen | `att p=` wird positiv, `gyro p=` beim Kippen positiv | `cfg.gyro_sign[AXIS_PITCH] = -1.0f;` |
-| von oben gesehen gegen den Uhrzeigersinn drehen | `gyro y=` positiv | `cfg.gyro_sign[AXIS_YAW] = -1.0f;` |
-| Sticks bewegen (armed nicht nötig) | Roll rechts → `sp r=` positiv, Pitch vorne → `sp p=` positiv, **Yaw rechts → `sp y=` negativ** | `cfg.stick_sign[...]` umkehren |
+| rechte Seite nach unten kippen | `att r=` wird positiv, `gyro r=` beim Kippen positiv | `set gyro_sign_roll -1` |
+| Nase nach unten kippen | `att p=` wird positiv, `gyro p=` beim Kippen positiv | `set gyro_sign_pitch -1` |
+| von oben gesehen gegen den Uhrzeigersinn drehen | `gyro y=` positiv | `set gyro_sign_yaw -1` |
+| Sticks bewegen (armed nicht nötig) | Roll rechts → `sp r=` positiv, Pitch vorne → `sp p=` positiv, **Yaw rechts → `sp y=` negativ** | `set stick_sign_… -1` (bzw. `1`) |
 
 > Achtung: Die Lage (`att`) kann nur stimmen, wenn auch das Gyro-Vorzeichen stimmt.
 > Zuerst `gyro`, dann `att` prüfen. Danach folgt Schritt 4 mit Motoren als Gegenprobe.
@@ -51,22 +53,31 @@ Akku **ab**, nur USB. `python tools/fc_cli.py live` starten und die Drohne beweg
 Armed, Gas ca. 20 %, Drohne in der Hand. Schnell um eine Achse drehen und hören,
 welche Motoren **schneller** werden:
 
-| Bewegung | Diese Motoren müssen schneller werden | Korrektur in `main.c`, falls falsch |
+| Bewegung | Diese Motoren müssen schneller werden | Korrektur (in `fc_cli.py term`), falls falsch |
 |---|---|---|
-| rechte Seite nach unten kippen | rechts (M1, M2) | `cfg.gyro_sign[AXIS_ROLL] = -1.0f;` |
-| Nase nach unten kippen | vorne (M2, M4) | `cfg.gyro_sign[AXIS_PITCH] = -1.0f;` |
-| im Uhrzeigersinn drehen (von oben) | die im Uhrzeigersinn drehenden Motoren | `cfg.gyro_sign[AXIS_YAW] = -1.0f;` |
+| rechte Seite nach unten kippen | rechts (M1, M2) | `set gyro_sign_roll -1` |
+| Nase nach unten kippen | vorne (M2, M4) | `set gyro_sign_pitch -1` |
+| im Uhrzeigersinn drehen (von oben) | die im Uhrzeigersinn drehenden Motoren | `set gyro_sign_yaw -1` |
 
 Danach dieselbe Prüfung mit den Sticks (Drohne still):
 
 | Stick | Diese Motoren müssen schneller werden | Korrektur |
 |---|---|---|
-| Roll nach rechts | links (M3, M4) | `cfg.stick_sign[AXIS_ROLL] = -1.0f;` |
-| Pitch nach vorne | hinten (M1, M3) | `cfg.stick_sign[AXIS_PITCH] = -1.0f;` |
-| Yaw nach rechts | die gegen den Uhrzeigersinn drehenden Motoren | `cfg.stick_sign[AXIS_YAW] = -1.0f;` |
+| Roll nach rechts | links (M3, M4) | `set stick_sign_roll -1` |
+| Pitch nach vorne | hinten (M1, M3) | `set stick_sign_pitch -1` |
+| Yaw nach rechts | die gegen den Uhrzeigersinn drehenden Motoren | `set stick_sign_yaw -1` |
 
 > Für die Yaw-Achse gilt: Ein Propeller, der im Uhrzeigersinn dreht, erzeugt ein
 > Reaktionsmoment gegen den Uhrzeigersinn (Kap. 2.1).
+
+Alle Korrekturen danach mit `save` speichern und mit `diff` ins Testprotokoll übernehmen.
+Die Simulation zeigt, was ein falsches Vorzeichen bewirkt: Die Drohne überschlägt sich in
+< 0.2 s, bevor der Runaway-Schutz abschaltet (`tools/sim/README.md`).
+
+## 4b. Beschleunigungssensor kalibrieren (für Angle-Mode)
+
+Drohne auf eine **waagrechte** Fläche stellen (Wasserwaage), `acccal`, 1 s nicht berühren,
+danach `save`. Kontrolle mit `live`: `att r=` und `att p=` unter 1°.
 
 ## 5. Failsafe
 

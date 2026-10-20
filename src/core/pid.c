@@ -16,6 +16,8 @@ void pid_init(pid_axis_t *pid, const pid_params_t *prm)
     lpf_stage_init(&pid->dterm1, prm->dterm_lpf1_type, prm->dterm_lpf1_hz, fs);
     lpf_stage_init(&pid->dterm2, prm->dterm_lpf2_type, prm->dterm_lpf2_hz, fs);
     pt1_init(&pid->ff_lpf, prm->ff_lpf_hz > 0.0f ? prm->ff_lpf_hz : 0.45f * fs, prm->dt);
+    pid->p_lpf_on = prm->p_lpf_hz > 0.0f && prm->p_lpf_hz < 0.5f * fs;
+    if (pid->p_lpf_on) pt1_init(&pid->p_lpf, prm->p_lpf_hz, prm->dt);
     pt1_init(&pid->relax_lpf, prm->iterm_relax_hz > 0.0f ? prm->iterm_relax_hz : 15.0f, prm->dt);
     pid_reset(pid);
 }
@@ -28,6 +30,10 @@ void pid_reset(pid_axis_t *pid)
     pid->has_prev = false;
     pid->p = pid->i = pid->d = pid->f = pid->sum_raw = pid->out = 0.0f;
     pt1_reset(&pid->ff_lpf, 0.0f);
+    pt1_reset(&pid->relax_lpf, 0.0f);
+    if (pid->p_lpf_on) pt1_reset(&pid->p_lpf, 0.0f);
+    lpf_stage_reset(&pid->dterm1);
+    lpf_stage_reset(&pid->dterm2);
 }
 
 float pid_update(pid_axis_t *pid, float setpoint, float measurement, const pid_runtime_t *rt)
@@ -57,6 +63,7 @@ float pid_update(pid_axis_t *pid, float setpoint, float measurement, const pid_r
 
     /* P */
     pid->p = pid->kp * error;
+    if (pid->p_lpf_on) pid->p = pt1_apply(&pid->p_lpf, pid->p);
 
     /* I mit I-Term-Relax und Anti-Windup */
     float relax = 1.0f;
@@ -64,8 +71,9 @@ float pid_update(pid_axis_t *pid, float setpoint, float measurement, const pid_r
         const float hp = fabsf(setpoint - sp_lp);
         relax = constrainf(1.0f - hp / ITERM_RELAX_THRESHOLD, 0.0f, 1.0f);
     }
-    pid->i_term += pid->ki * error * pid->dt * relax * constrainf(rt->i_factor, 0.0f, 1.0f);
-    pid->i_term = constrainf(pid->i_term, -pid->i_limit, pid->i_limit);
+    const float i_new = pid->i_term + pid->ki * error * pid->dt * relax * constrainf(rt->i_factor, 0.0f, 1.0f);
+    if (isfinite(i_new))                 /* ungueltige Werte nie uebernehmen (wie PX4) */
+        pid->i_term = constrainf(i_new, -pid->i_limit, pid->i_limit);
     pid->i = pid->i_term;
 
     /* D auf den Istwert (kein "D-Kick" bei Stickspruengen), mit TPA */
@@ -75,6 +83,10 @@ float pid_update(pid_axis_t *pid, float setpoint, float measurement, const pid_r
     pid->f = pid->kf * ff_filt;
 
     pid->sum_raw = pid->p + pid->i + pid->d + pid->f;
+    if (!isfinite(pid->sum_raw)) {       /* Schutz: nie NaN an den Mischer geben */
+        pid_reset(pid);
+        return 0.0f;
+    }
     pid->out = constrainf(pid->sum_raw, -pid->sum_limit, pid->sum_limit);
     return pid->out;
 }

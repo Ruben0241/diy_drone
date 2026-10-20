@@ -27,6 +27,9 @@ jobs:
           python tools/analysis/test_fc_analysis.py
           python tools/analysis/test_buildb_log.py
 
+      - name: Simulation (Firmware-Kern im Physikmodell)
+        run: python tools/sim/test_sim.py
+
       - name: Firmware bauen
         run: |
           cmake -S . -B build

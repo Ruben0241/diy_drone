@@ -23,7 +23,9 @@ static const param_def_t defs[] = {
     { "pidsum_limit_yaw",   F(sum_limit[2]), 100, 1000, 0, true },
     { "iterm_relax",     F(iterm_relax), 0, 2, 0, true },
     { "iterm_relax_cutoff", F(iterm_relax_hz), 1, 50, 0, true },
-    { "iterm_windup",    F(iterm_windup), 0.3f, 1, 2, false },
+    { "iterm_windup",    F(iterm_windup), 20, 100, 0, true },
+    { "iterm_mix_windup", F(iterm_mix_windup), 0.3f, 1, 2, false },
+    { "yaw_lowpass_hz",  F(yaw_lowpass_hz), 0, 500, 0, true },
     { "tpa_rate",        F(tpa_rate), 0, 1, 2, false },
     { "tpa_breakpoint",  F(tpa_breakpoint), 0, 1, 2, false },
 

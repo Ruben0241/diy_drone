@@ -36,7 +36,9 @@ typedef struct {
     float sum_limit[AXIS_COUNT];   /* Betaflight: 500 / 500 / 400 */
     float iterm_relax;             /* 0 aus, 1 Roll/Pitch, 2 Roll/Pitch/Yaw */
     float iterm_relax_hz;
-    float iterm_windup;            /* Saettigungsgrenze 0..1 fuer Anti-Windup (1 = aus) */
+    float iterm_windup;            /* I-Grenze in % von pidsum_limit (Betaflight iterm_windup, 80) */
+    float iterm_mix_windup;        /* Saettigungsgrenze 0..1 fuer Anti-Windup ueber den Mischer (1 = aus) */
+    float yaw_lowpass_hz;          /* PT1 auf den Yaw-P-Anteil (Betaflight yaw_lowpass_hz, 100; 0 = aus) */
     float tpa_rate;                /* 0..1: D-Abschwaechung bei Vollgas (0 = aus) */
     float tpa_breakpoint;          /* Gas 0..1, ab dem TPA wirkt */
 

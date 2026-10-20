@@ -114,6 +114,19 @@ static const pid_runtime_t RT_NORMAL = { .i_factor = 1.0f, .d_factor = 1.0f, .st
 
 static void test_pid(void)
 {
+    {   /* ungueltiger Messwert: Ausgang 0, I bleibt endlich */
+        pid_params_t q = { .p_gain = 45, .i_gain = 80, .d_gain = 30, .i_limit = 400, .sum_limit = 500,
+                           .dt = 0.001f };
+        pid_axis_t a;
+        pid_runtime_t r = { .i_factor = 1, .d_factor = 1, .stabilise = true };
+        pid_init(&a, &q);
+        pid_update(&a, 100, 0, &r);
+        CHECK(pid_update(&a, 100, NAN, &r) == 0.0f);
+        CHECK(isfinite(a.i_term));
+        pid_update(&a, 100, 0, &r);
+        CHECK(isfinite(a.d) && a.out > 0.0f);   /* erholt sich wieder (Filter zurueckgesetzt) */
+    }
+
     printf("PID\n");
     pid_axis_t pid;
     pid_params_t prm = pid_prm(45, 0, 0, 0);
@@ -460,6 +473,18 @@ static void test_flight_features(void)
     memset(&in, 0, sizeof(in));
     in.acc_g[2] = 1.0f;
     in.rc_valid = true;
+
+    /* I-Grenzen wie Betaflight: 80 % von 500 (Roll/Pitch) bzw. 400 (Yaw); Yaw-P mit 100-Hz-Tiefpass */
+    flight_init(&f, &cfg);
+    CHECK_NEAR(f.pid[AXIS_ROLL].i_limit, 400.0f, 1e-3);
+    CHECK_NEAR(f.pid[AXIS_YAW].i_limit, 320.0f, 1e-3);
+    CHECK(f.pid[AXIS_YAW].p_lpf_on && !f.pid[AXIS_ROLL].p_lpf_on);
+    {
+        pid_runtime_t r = { .i_factor = 1, .d_factor = 1, .stabilise = true };
+        const float p_yaw = pid_update(&f.pid[AXIS_YAW], 100.0f, 0.0f, &r);   /* erster Schritt gedaempft */
+        CHECK(f.pid[AXIS_YAW].p > 0.0f && f.pid[AXIS_YAW].p < 0.5f * f.pid[AXIS_YAW].kp * 100.0f);
+        (void)p_yaw;
+    }
 
     /* Gas unten, Airmode noch nicht aktiv: keine Regelung (Motoren nur Leerlauf) */
     flight_init(&f, &cfg);

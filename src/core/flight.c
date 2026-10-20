@@ -20,7 +20,9 @@ void flight_default_config(flight_config_t *c)
     c->sum_limit[AXIS_YAW] = 400.0f;
     c->iterm_relax = 0.0f;          /* Betaflight-Standard: RP; fuer den Vergleich aus */
     c->iterm_relax_hz = 15.0f;
-    c->iterm_windup = 0.85f;
+    c->iterm_windup = 80.0f;        /* Betaflight 2025.12/master: I-Grenze 80 % von 500 bzw. 400 */
+    c->iterm_mix_windup = 0.85f;    /* zusaetzlich: I bremsen, wenn der Mischer saettigt (wie PX4) */
+    c->yaw_lowpass_hz = 100.0f;
     c->tpa_rate = 0.0f;             /* Betaflight-Standard: 0.65 ab 0.35; fuer den Vergleich aus */
     c->tpa_breakpoint = 0.35f;
 
@@ -88,7 +90,9 @@ static void setup_from_config(flight_t *f)
     for (int a = 0; a < AXIS_COUNT; a++) {
         const pid_params_t prm = {
             .p_gain = c->pid_p[a], .i_gain = c->pid_i[a], .d_gain = c->pid_d[a], .f_gain = c->pid_f[a],
-            .i_limit = c->i_limit, .sum_limit = c->sum_limit[a], .dt = dt,
+            .i_limit = fminf(c->i_limit, 0.01f * c->iterm_windup * c->sum_limit[a]),
+            .sum_limit = c->sum_limit[a], .dt = dt,
+            .p_lpf_hz = (a == AXIS_YAW) ? c->yaw_lowpass_hz : 0.0f,
             .dterm_lpf1_type = (int)c->dterm_lpf1_type, .dterm_lpf1_hz = c->dterm_lpf1_hz,
             .dterm_lpf2_type = (int)c->dterm_lpf2_type, .dterm_lpf2_hz = c->dterm_lpf2_hz,
             .ff_lpf_hz = c->ff_smoothing_hz,
@@ -339,8 +343,8 @@ void flight_step(flight_t *f, const flight_input_t *in)
     rt.stabilise = f->armed && (f->airmode_active || throttle >= c->low_throttle);
     /* Anti-Windup: I nicht weiter aufbauen, wenn die Motoren schon am Anschlag sind */
     rt.i_factor = 1.0f;
-    if (c->iterm_windup < 1.0f) {
-        rt.i_factor = constrainf((1.0f - f->mix_range) / (1.0f - c->iterm_windup), 0.0f, 1.0f);
+    if (c->iterm_mix_windup < 1.0f) {
+        rt.i_factor = constrainf((1.0f - f->mix_range) / (1.0f - c->iterm_mix_windup), 0.0f, 1.0f);
     }
     /* TPA: D bei viel Gas abschwaechen (Betaflight tpa_mode = D) */
     rt.d_factor = 1.0f;
