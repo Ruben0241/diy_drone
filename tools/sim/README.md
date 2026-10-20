@@ -32,11 +32,11 @@ Integration: halbimplizites Euler-Verfahren mit 8 kHz, Regelung mit 1 kHz (wie F
 
 | Achse | Anstiegszeit | Überschwingen | Ausregelzeit |
 |---|---|---|---|
-| Roll | 15 ms | 17 % | 148 ms |
-| Pitch | 18 ms | 22 % | 152 ms |
-| Yaw | 61 ms | 6 % | 261 ms |
+| Roll | 16 ms | 17 % | 147 ms |
+| Pitch | 17 ms | 22 % | 163 ms |
+| Yaw | 60 ms | 6 % | 264 ms |
 
-- Schweben: Lage stabil auf ±0.01°, Schwebe-Gas ≈ 0.29.
+- Schweben: Lage stabil auf ±0.01°, Gasstellung ≈ 0.30 (Motorbefehl 0.34).
 - Böe 0.05 N·m für 0.2 s: max. 1.4° Roll, nach 1 s ausgeregelt.
 - Falsches Gyro-Vorzeichen: Runaway-Schutz schaltet 0.15 s nach dem Abheben ab – die
   Drohne hat sich bis dahin aber schon überschlagen. → Der Bodentest bleibt Pflicht.
@@ -52,6 +52,6 @@ python tools/sim/vergleich_theorie.py --out physik    # Formel (Schwinger 2. Ord
 
 | Roll-Regler | Formel: Anstieg / Überschwingen | Simulation |
 |---|---|---|
-| nur P | 11.4 ms / 48 % | 10.6 ms / 55 % |
-| P + D | 23.7 ms / 1 % | 22.0 ms / 2 % |
-| PID (Standard) | – | 15.4 ms / 17 % |
+| nur P | 11.6 ms / 47 % | 10.8 ms / 54 % |
+| P + D | 23.9 ms / 1 % | 20.6 ms / 3 % |
+| PID (Standard) | – | 15.7 ms / 17 % |

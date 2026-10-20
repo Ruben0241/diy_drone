@@ -40,7 +40,7 @@ class DroneParams:
     battery_dz: float = 0.035      # SCHAETZUNG: Akkumitte ueber der Motorebene
     body_size: tuple = (0.10, 0.06, 0.02)          # SCHAETZUNG: Rumpf als Quader
     # --- Rotor/Motor ---
-    k_T: float = 7.0e-7            # N s^2, aus T-Hobby-Testdaten (T76) auf 90 mm skaliert (siehe rotor_from_data)
+    k_T: float = 6.7e-7            # N s^2, Mittel der Herstellerdaten (T76, 50-95 %) auf 90 mm skaliert (D^4)
     k_Q: float = 6.75e-9           # N m s^2, ebenso
     omega_max: float = 3620.0      # rad/s, aus maximaler mechanischer Leistung (siehe rotor_from_data)
     tau_motor: float = 0.020       # s, aus Motorgleichungen (siehe motor_time_constant)
@@ -98,7 +98,7 @@ def rotor_from_data():
     gleiche Bauart -> k_T ~ D^4, k_Q ~ D^5 (aus C_T, C_P = konstant, Brandt & Selig 2011)."""
     T = 0.76772 * G
     w = 43870 * 2 * math.pi / 60
-    kT76 = T / w**2
+    kT76 = 3.40e-7                     # Mittel T/Omega^2 von 50-95 % Gas (physik_rechnungen.py)
     kQ76 = 0.8 * 351.87 / w**3
     s = 90 / 76
     kT, kQ = kT76 * s**4, kQ76 * s**5
