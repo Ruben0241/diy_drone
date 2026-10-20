@@ -42,3 +42,16 @@ Integration: halbimplizites Euler-Verfahren mit 8 kHz, Regelung mit 1 kHz (wie F
   Drohne hat sich bis dahin aber schon überschlagen. → Der Bodentest bleibt Pflicht.
 - Ohne Rotor-Reaktionsmoment im Modell schwingt Yaw um ~70 % über: Bei Yaw trägt das
   Beschleunigen der Rotoren (J_r dΩ/dt) wesentlich zum Drehmoment bei.
+
+## Physik-Kapitel der Begleitarbeit
+
+```bash
+python tools/sim/physik_rechnungen.py --out physik    # alle Zahlen + Abb. Schub/Drehzahl
+python tools/sim/vergleich_theorie.py --out physik    # Formel (Schwinger 2. Ordnung) gegen Simulation
+```
+
+| Roll-Regler | Formel: Anstieg / Überschwingen | Simulation |
+|---|---|---|
+| nur P | 11.4 ms / 48 % | 10.6 ms / 55 % |
+| P + D | 23.7 ms / 1 % | 22.0 ms / 2 % |
+| PID (Standard) | – | 15.4 ms / 17 % |
