@@ -69,6 +69,50 @@ void flight_default_config(flight_config_t *c)
 
     c->gyro_cal_samples = 1000.0f;  /* 1 s bei 1 kHz */
     c->gyro_cal_max_dev_dps = 4.0f;
+
+    for (int i = 0; i < MIXER_MOTOR_COUNT; i++) c->motor_out[i] = (float)(i + 1);
+    c->vbat_scale = 110.0f;
+    c->vbat_warn_cell = 3.5f;
+    c->rx_uart = 0.0f;              /* automatisch: der erste UART mit gueltigen CRSF-Paketen */
+    c->crsf_telemetry = 1.0f;
+
+    /* Schalter: oben (>= 1700 us) wie ueblich in Betaflight */
+    c->arm_ch = 5.0f;   c->arm_min_us = 1700.0f;   c->arm_max_us = 2100.0f;
+    c->angle_ch = 6.0f; c->angle_min_us = 1700.0f; c->angle_max_us = 2100.0f;
+}
+
+float crsf_to_us(uint16_t v)
+{
+    return ((float)v - 992.0f) * 0.625f + 1500.0f;
+}
+
+bool flight_switch_active(const uint16_t ch[CRSF_NUM_CHANNELS], float ch_no, float min_us, float max_us)
+{
+    const int n = (int)ch_no;
+    if (n < 1 || n > (int)CRSF_NUM_CHANNELS) return false;
+    const float us = crsf_to_us(ch[n - 1]);
+    return us >= min_us && us <= max_us;
+}
+
+bool flight_motor_map_valid(const flight_config_t *c)
+{
+    unsigned used = 0;
+    for (int i = 0; i < MIXER_MOTOR_COUNT; i++) {
+        const float v = c->motor_out[i];
+        const int o = (int)v;
+        if ((float)o != v || o < 1 || o > MIXER_MOTOR_COUNT) return false;
+        used |= 1u << (o - 1);
+    }
+    return used == (1u << MIXER_MOTOR_COUNT) - 1u;
+}
+
+void flight_map_outputs(const flight_t *f, uint16_t out[MIXER_MOTOR_COUNT])
+{
+    for (int i = 0; i < MIXER_MOTOR_COUNT; i++) out[i] = 0;
+    if (!flight_motor_map_valid(&f->cfg)) return;
+    for (int i = 0; i < MIXER_MOTOR_COUNT; i++) {
+        out[(int)f->cfg.motor_out[i] - 1] = f->dshot[i];
+    }
 }
 
 static void cal_restart(flight_t *f)
@@ -144,6 +188,14 @@ void flight_start_acc_calibration(flight_t *f)
     f->acc_cal_sum[0] = f->acc_cal_sum[1] = f->acc_cal_sum[2] = 0.0f;
 }
 
+bool flight_start_gyro_calibration(flight_t *f)
+{
+    if (f->armed) return false;
+    f->calibrated = false;
+    cal_restart(f);
+    return true;
+}
+
 static void gyro_calibration(flight_t *f, const float raw[AXIS_COUNT])
 {
     for (int a = 0; a < AXIS_COUNT; a++) {
@@ -197,7 +249,10 @@ static void disarm(flight_t *f)
 
 static void update_arming(flight_t *f, const flight_input_t *in, float throttle)
 {
-    const bool arm_switch = in->rc_valid && crsf_to_unipolar(in->channels[CH_ARM]) > 0.5f;
+    const bool arm_switch = in->rc_valid &&
+        flight_switch_active(in->channels, f->cfg.arm_ch, f->cfg.arm_min_us, f->cfg.arm_max_us);
+    const bool level = fabsf(f->attitude_deg[0]) < f->cfg.arm_angle_max_deg &&
+                       fabsf(f->attitude_deg[1]) < f->cfg.arm_angle_max_deg;
 
     /* Failsafe: keine gueltigen Pakete -> sofort Motoren aus */
     if (!in->rc_valid) {
@@ -205,30 +260,38 @@ static void update_arming(flight_t *f, const flight_input_t *in, float throttle)
         f->failsafe = true;
         f->arm_switch_seen_off = false;   /* nach Verbindungsverlust Schalter neu betaetigen */
         disarm(f);
-        return;
-    }
-    f->failsafe = false;
-
-    if (!arm_switch) {
-        f->arm_switch_seen_off = true;
-        f->runaway_triggered = false;
-        disarm(f);
-        return;
-    }
-
-    if (!f->armed) {
-        const bool level = fabsf(f->attitude_deg[0]) < f->cfg.arm_angle_max_deg &&
-                           fabsf(f->attitude_deg[1]) < f->cfg.arm_angle_max_deg;
-        if (f->arm_switch_seen_off && f->calibrated && level && !in->arm_inhibit &&
-            !f->acc_cal_running && throttle < f->cfg.arm_throttle_max) {
-            f->armed = true;
-            f->event_armed = true;
-            f->airmode_active = false;
-            f->runaway_armed = f->cfg.runaway_prevention >= 0.5f;
-            f->runaway_time_s = 0.0f;
-            f->takeoff_time_s = 0.0f;
-            for (int a = 0; a < AXIS_COUNT; a++) pid_reset(&f->pid[a]);
+    } else {
+        f->failsafe = false;
+        if (!arm_switch) {
+            f->arm_switch_seen_off = true;
+            f->runaway_triggered = false;
+            disarm(f);
+        } else if (in->motor_test && !f->armed) {
+            /* Schalter waehrend des Motortests eingeschaltet: nicht spaeter "von selbst" armen */
+            f->arm_switch_seen_off = false;
         }
+    }
+
+    uint16_t b = 0;
+    if (!in->rc_valid) b |= ARM_BLOCK_NO_RX;
+    if (!f->arm_switch_seen_off) b |= ARM_BLOCK_SWITCH;
+    if (!f->calibrated) b |= ARM_BLOCK_GYRO_CAL;
+    if (!level) b |= ARM_BLOCK_ANGLE;
+    if (throttle >= f->cfg.arm_throttle_max) b |= ARM_BLOCK_THROTTLE;
+    if (in->arm_inhibit) b |= ARM_BLOCK_USB;
+    if (f->acc_cal_running) b |= ARM_BLOCK_ACC_CAL;
+    if (in->motor_test) b |= ARM_BLOCK_MOTOR_TEST;
+    if (!flight_motor_map_valid(&f->cfg)) b |= ARM_BLOCK_MOTOR_MAP;
+    f->arm_block = f->armed ? 0 : b;
+
+    if (!f->armed && arm_switch && b == 0) {
+        f->armed = true;
+        f->event_armed = true;
+        f->airmode_active = false;
+        f->runaway_armed = f->cfg.runaway_prevention >= 0.5f;
+        f->runaway_time_s = 0.0f;
+        f->takeoff_time_s = 0.0f;
+        for (int a = 0; a < AXIS_COUNT; a++) pid_reset(&f->pid[a]);
     }
 }
 
@@ -301,6 +364,10 @@ void flight_step(flight_t *f, const flight_input_t *in)
     const float acc_norm = sqrtf(f->acc_f[0] * f->acc_f[0] + f->acc_f[1] * f->acc_f[1] +
                                  f->acc_f[2] * f->acc_f[2]);
     const bool use_acc = acc_norm > 0.8f && acc_norm < 1.2f;
+    /* Am Boden (disarmed) schneller auf die Beschleunigung einregeln, wie Betaflight
+     * imuUseFastGains (10-fach): sonst zeigt die Lage nach dem Einschalten in Schraeglage
+     * einige Sekunden lang zu kleine Winkel und die Arm-Pruefung "zu schraeg" greift spaet. */
+    f->ahrs.kp = f->armed ? c->mahony_kp : 10.0f * c->mahony_kp;
     mahony_update(&f->ahrs, f->gyro_f[0] * DEG2RAD, f->gyro_f[1] * DEG2RAD, f->gyro_f[2] * DEG2RAD,
                   f->acc_f[0], f->acc_f[1], f->acc_f[2], use_acc || !f->calibrated, dt);
     mahony_get_euler_deg(&f->ahrs, &f->attitude_deg[0], &f->attitude_deg[1], &f->attitude_deg[2]);
@@ -316,7 +383,8 @@ void flight_step(flight_t *f, const flight_input_t *in)
     }
     const float throttle = in->rc_valid ? crsf_to_unipolar(in->channels[CH_THROTTLE]) : 0.0f;
     f->throttle = throttle;
-    f->mode = (in->rc_valid && crsf_to_unipolar(in->channels[CH_MODE]) > 0.5f) ? MODE_ANGLE : MODE_RATE;
+    f->mode = (in->rc_valid && flight_switch_active(in->channels, c->angle_ch, c->angle_min_us, c->angle_max_us))
+              ? MODE_ANGLE : MODE_RATE;
 
     /* 4. Arming / Failsafe */
     update_arming(f, in, throttle);

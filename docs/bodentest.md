@@ -2,6 +2,12 @@
 
 **Immer ohne Propeller.** Akku über den Smoke Stopper anschliessen.
 
+> Einfacher mit dem **Configurator** (`python tools/configurator/start_configurator.py`):
+> Tab **Bodentest** erkennt die Schritte 3b, Arm-Schalter, Failsafe und ACC-Kalibrierung automatisch,
+> korrigiert falsche Vorzeichen mit einem Klick und speichert ein Testprotokoll (.md).
+> Tab **Motoren** hat einen Assistenten für die Motor-Reihenfolge (Schritt 3),
+> Tab **Übersicht** zeigt, warum gerade nicht gearmt werden kann.
+
 ## 1. Start
 
 | Prüfung | Erwartung | Wenn nicht |
@@ -9,6 +15,7 @@
 | Kurzer Piepser beim Einschalten | Firmware läuft | Flash prüfen, Board-Target prüfen |
 | Dauerndes kurzes Piepsen (alle 0.5 s) | **Fehler**: Gyro nicht gefunden oder Absturz | Board ist nicht GEPRCF722 oder Gyro-Pins anders |
 | LED 0 blinkt schnell | Gyro-Kalibrierung läuft oder kein Empfänger | Drohne still hinstellen, Fernsteuerung einschalten |
+| `info` → `rx uart=` | UART, an dem der Empfänger gefunden wurde (Suche auf 1, 2, 3, 4, 6) | `0 (suche...)`: Empfänger gebunden? Fernsteuerung an? |
 | LED 0 blinkt langsam | bereit | – |
 
 ## 2. Arming
@@ -31,8 +38,9 @@ Prüfen, welcher Motor dreht und in welche Richtung (Klebeband-Fähnchen auf der
 | M3 | hinten links | |
 | M4 | vorne links | |
 
-Stimmt die Position nicht: in Betaflight wurde eventuell eine Motor-Neuzuordnung
-(`resource MOTOR`) verwendet. In `diff all` nachsehen.
+Stimmt die Position nicht: `set motor1_out …` bis `motor4_out` (Ausgang für M1…M4) oder im
+Configurator Tab Motoren → «Assistent starten». In Betaflight entspricht das `resource MOTOR`
+(in `diff all` nachsehen).
 
 ## 3b. Sensorrichtung ohne Motoren (über USB)
 
@@ -78,6 +86,12 @@ Die Simulation zeigt, was ein falsches Vorzeichen bewirkt: Die Drohne überschl�
 
 Drohne auf eine **waagrechte** Fläche stellen (Wasserwaage), `acccal`, 1 s nicht berühren,
 danach `save`. Kontrolle mit `live`: `att r=` und `att p=` unter 1°.
+
+## 4c. Akkuspannung
+
+Spannung mit dem Multimeter am Akku messen und mit `info` (`vbat`) bzw. dem Configurator vergleichen.
+Abweichung: `set vbat_scale <wert>` (neu = alt × gemessen / angezeigt), wie Betaflight.
+Auf der Fernsteuerung erscheinen nach «Discover new sensors» `RxBt`, `Bat%` und `FM`.
 
 ## 5. Failsafe
 

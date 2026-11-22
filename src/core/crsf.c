@@ -102,3 +102,38 @@ float crsf_to_unipolar(uint16_t v)
                     (float)(CRSF_CHANNEL_MAX - CRSF_CHANNEL_MIN);
     return constrainf(x, 0.0f, 1.0f);
 }
+
+/* ---------- Telemetrie ---------- */
+
+static uint32_t finish_frame(uint8_t *out, uint32_t payload_len)
+{
+    /* out[2] = Typ, out[3..] = Nutzdaten */
+    out[0] = 0xC8;                                   /* an den Empfaenger */
+    out[1] = (uint8_t)(payload_len + 2u);            /* Typ + Nutzdaten + CRC */
+    out[3 + payload_len] = crsf_crc8(&out[2], payload_len + 1u);
+    return payload_len + 4u;
+}
+
+uint32_t crsf_build_battery(uint8_t out[CRSF_TELEMETRY_MAX], float volts, float amps,
+                            uint32_t mah, uint8_t percent)
+{
+    const float v10 = constrainf(volts * 10.0f + 0.5f, 0.0f, 65535.0f);
+    const float a10 = constrainf(amps * 10.0f + 0.5f, 0.0f, 65535.0f);
+    const uint16_t v = (uint16_t)v10, a = (uint16_t)a10;
+    if (mah > 0xFFFFFFu) mah = 0xFFFFFFu;
+    out[2] = CRSF_FRAMETYPE_BATTERY;
+    out[3] = (uint8_t)(v >> 8);  out[4] = (uint8_t)v;     /* Big Endian */
+    out[5] = (uint8_t)(a >> 8);  out[6] = (uint8_t)a;
+    out[7] = (uint8_t)(mah >> 16); out[8] = (uint8_t)(mah >> 8); out[9] = (uint8_t)mah;
+    out[10] = percent > 100 ? 100 : percent;
+    return finish_frame(out, 8);
+}
+
+uint32_t crsf_build_flight_mode(uint8_t out[CRSF_TELEMETRY_MAX], const char *mode)
+{
+    uint32_t n = 0;
+    out[2] = CRSF_FRAMETYPE_FLIGHT_MODE;
+    while (mode[n] && n < 15) { out[3 + n] = (uint8_t)mode[n]; n++; }
+    out[3 + n] = 0;                                  /* Text mit Nullbyte */
+    return finish_frame(out, n + 1u);
+}

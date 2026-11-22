@@ -39,6 +39,12 @@ extern volatile bool      g_cfg_from_flash;        /* beim Start gespeicherte We
 extern volatile float     g_motor_test_value[4];
 extern volatile uint32_t  g_motor_test_until_ms;
 extern volatile bool      g_acc_cal_request;
+extern volatile bool      g_gyro_cal_request;
+
+/* Empfaenger: gefundener UART (0 = noch keiner), Ausgaenge nach motorN_out */
+extern volatile uint8_t   g_rx_uart;
+extern volatile uint16_t  g_motor_out[4];
+extern volatile uint8_t   g_battery_cells;
 
 /* Zeitmessung der Regelschleife [us] */
 extern volatile uint32_t  g_loop_us_max, g_loop_us_avg_x10;

@@ -15,6 +15,11 @@ jobs:
       - name: Toolchain installieren
         run: sudo apt-get update && sudo apt-get install -y gcc-arm-none-eabi libnewlib-arm-none-eabi cmake
 
+      - name: Firmware bauen
+        run: |
+          cmake -S . -B build
+          cmake --build build
+
       - name: Host-Tests (Kernmodule)
         run: |
           cmake -S tests -B build-tests
@@ -27,13 +32,13 @@ jobs:
           python tools/analysis/test_fc_analysis.py
           python tools/analysis/test_buildb_log.py
 
+      - name: Configurator (Protokoll gegen die Firmware-Ausgaben)
+        run: |
+          node tools/configurator/test/test_protocol.js
+          node tools/configurator/test/test_flasher.js
+
       - name: Simulation (Firmware-Kern im Physikmodell)
         run: python tools/sim/test_sim.py
-
-      - name: Firmware bauen
-        run: |
-          cmake -S . -B build
-          cmake --build build
 
       - uses: actions/upload-artifact@v4
         with:
@@ -41,3 +46,4 @@ jobs:
           path: |
             build/firmware.hex
             build/firmware.bin
+            tools/configurator/

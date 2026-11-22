@@ -172,8 +172,17 @@ void gpio_config(GPIO_TypeDef *port, uint32_t pin, gpio_mode_t mode, uint32_t af
     port->MODER = (port->MODER & ~(3u << (pin * 2u))) | ((uint32_t)mode << (pin * 2u));
 }
 
+static volatile bool watchdog_started;
+
+bool watchdog_running(void)
+{
+    return watchdog_started;
+}
+
 void watchdog_init(uint32_t timeout_ms)
 {
+    if (watchdog_started) return;
+    watchdog_started = true;
     /* LSI ~32 kHz, Teiler 32 -> 1 kHz, also 1 Zaehlerschritt pro ms */
     IWDG->KR = 0xCCCC;          /* starten */
     IWDG->KR = 0x5555;          /* Register freigeben */
@@ -185,5 +194,5 @@ void watchdog_init(uint32_t timeout_ms)
 
 void watchdog_kick(void)
 {
-    IWDG->KR = 0xAAAA;
+    if (watchdog_started) IWDG->KR = 0xAAAA;
 }

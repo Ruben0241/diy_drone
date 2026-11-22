@@ -16,9 +16,20 @@
  *   save            Einstellungen im Flash speichern
  *   diff            nur Abweichungen vom Standard anzeigen (fuer die Dokumentation)
  *   defaults        alle Einstellungen auf Standard (erst mit save dauerhaft)
- *   motor n prozent Motortest ohne Propeller: n = 1..4 oder all, max. 40 %, 3 s
+ *   motor n prozent [ms]   Motortest ohne Propeller: n = 1..4 oder all, max. 40 %, Standard 3 s
+ *   motors a b c d [ms]    alle vier Motoren gleichzeitig (Prozent), fuer den Configurator
  *   motor stop      Motortest beenden
  *   acccal          Beschleunigungssensor kalibrieren (waagrecht und still hinstellen)
+ *   gyrocal         Gyro neu kalibrieren (1 s still halten)
+ *
+ * Fuer den Configurator (tools/configurator), maschinenlesbar:
+ *   version         "$V,fw=<git>,proto=1,board=GEPRCF722,params=<anzahl>"
+ *   params          alle Einstellungen "$P,name,wert,min,max,nachkommastellen,standard"
+ *   stream hz       Live-Daten "$H,..." (Feldnamen) und danach hz-mal pro Sekunde "$T,..."
+ *                   (src/core/telemetry.h), 0 = aus. Endet auch, wenn USB getrennt wird.
+ *   echo text       gibt text zurueck (Ende einer Antwort erkennen)
+ *
+ * Wird USB getrennt, stoppt ein laufender Motortest sofort.
  *
  * dump/erase/dfu/reboot sind nur moeglich, wenn nicht gearmt. Waehrend dump
  * und erase ist das Armen gesperrt. Das Gegenstueck am PC: tools/fc_cli.py
@@ -34,6 +45,7 @@
 #include "flash_w25q.h"
 #include "params.h"
 #include "system.h"
+#include "telemetry.h"
 
 /* ---------- USB-Hardware ---------- */
 
@@ -155,7 +167,8 @@ static void say(const char *s)
 static void cmd_help(void)
 {
     say("Befehle: help, info, status, live, dump, erase, erase all, dfu, reboot,");
-    say("         get [anfang], set name wert, save, diff, defaults, motor n %, motor stop, acccal");
+    say("         get [anfang], set name wert, save, diff, defaults, motor n % [ms], motors a b c d [ms],");
+    say("         motor stop, acccal, gyrocal, version, params, stream hz, echo text");
 }
 
 /* ---------- Einstellungen ---------- */
@@ -262,32 +275,181 @@ static void cmd_defaults(void)
 
 /* ---------- Motortest und ACC-Kalibrierung ---------- */
 
+#define MOTOR_TEST_MAX_PCT  40.0f
+#define MOTOR_TEST_DEF_MS   3000u
+#define MOTOR_TEST_MAX_MS   5000u
+
+static void motor_test_stop(void)
+{
+    for (int m = 0; m < 4; m++) g_motor_test_value[m] = 0.0f;
+    g_motor_test_until_ms = xTaskGetTickCount();
+}
+
+/* naechstes Wort als Zahl lesen; Rueckgabe Zeiger dahinter oder NULL */
+static char *next_number(char *p, float *v)
+{
+    while (*p == ' ') p++;
+    if (!*p) return NULL;
+    char *end = p;
+    while (*end && *end != ' ') end++;
+    const char save = *end;
+    *end = 0;
+    const bool ok = params_parse_float(p, v);
+    *end = save;
+    return ok ? end : NULL;
+}
+
+static bool parse_duration(char *p, uint32_t *ms)
+{
+    float v;
+    while (*p == ' ') p++;
+    if (!*p) { *ms = MOTOR_TEST_DEF_MS; return true; }
+    if (!next_number(p, &v) || v < 50.0f || v > (float)MOTOR_TEST_MAX_MS) return false;
+    *ms = (uint32_t)v;
+    return true;
+}
+
 static void cmd_motor(char *args)
 {
     if (refuse_if_armed()) return;
     while (*args == ' ') args++;
     if (strncmp(args, "stop", 4) == 0) {
-        g_motor_test_until_ms = xTaskGetTickCount();
-        for (int m = 0; m < 4; m++) g_motor_test_value[m] = 0.0f;
+        motor_test_stop();
         say("OK");
         return;
     }
-    char *pct = strchr(args, ' ');
-    float p;
-    if (!pct || !params_parse_float(pct + 1, &p) || p < 0.0f || p > 40.0f) {
-        say("ERR Aufruf: motor <1-4|all> <0-40>  (ohne Propeller!)");
-        return;
-    }
-    *pct = 0;
     int sel = -1;
-    if (strcmp(args, "all") != 0) {
-        float n;
-        if (!params_parse_float(args, &n) || n < 1.0f || n > 4.0f) { say("ERR Motor 1-4 oder all"); return; }
+    float n, p;
+    char *rest;
+    if (strncmp(args, "all", 3) == 0) {
+        rest = args + 3;
+    } else {
+        rest = next_number(args, &n);
+        if (!rest || n < 1.0f || n > 4.0f || n != (float)(int)n) { say("ERR Motor 1-4 oder all"); return; }
         sel = (int)n - 1;
     }
+    rest = next_number(rest, &p);
+    uint32_t ms;
+    if (!rest || p < 0.0f || p > MOTOR_TEST_MAX_PCT || !parse_duration(rest, &ms)) {
+        say("ERR Aufruf: motor <1-4|all> <0-40> [ms]  (ohne Propeller!)");
+        return;
+    }
     for (int m = 0; m < 4; m++) g_motor_test_value[m] = (sel < 0 || sel == m) ? p / 100.0f : 0.0f;
-    g_motor_test_until_ms = xTaskGetTickCount() + 3000u;
-    say("OK 3 s (ohne Propeller!)");
+    g_motor_test_until_ms = xTaskGetTickCount() + ms;
+    say("OK (ohne Propeller!)");
+}
+
+static void cmd_motors(char *args)
+{
+    if (refuse_if_armed()) return;
+    float v[4];
+    char *p = args;
+    for (int m = 0; m < 4; m++) {
+        p = p ? next_number(p, &v[m]) : NULL;
+        if (!p || v[m] < 0.0f || v[m] > MOTOR_TEST_MAX_PCT) {
+            say("ERR Aufruf: motors <0-40> <0-40> <0-40> <0-40> [ms]  (ohne Propeller!)");
+            return;
+        }
+    }
+    uint32_t ms;
+    if (!parse_duration(p, &ms)) { say("ERR Dauer 50-5000 ms"); return; }
+    for (int m = 0; m < 4; m++) g_motor_test_value[m] = v[m] / 100.0f;
+    g_motor_test_until_ms = xTaskGetTickCount() + ms;
+    say("OK");
+}
+
+static void cmd_gyrocal(void)
+{
+    if (refuse_if_armed()) return;
+    g_gyro_cal_request = true;
+    say("Gyro-Kalibrierung: Drohne still halten ...");
+    for (int i = 0; i < 40; i++) {
+        vTaskDelay(pdMS_TO_TICKS(100));
+        if (!g_gyro_cal_request && g_flight.calibrated) { say("OK"); return; }
+    }
+    say("ERR Kalibrierung nicht abgeschlossen (bewegt?)");
+}
+
+/* ---------- Configurator: Version, Parameterliste, Live-Daten ---------- */
+
+static uint32_t stream_period_ms;     /* 0 = aus */
+static TickType_t stream_next;
+
+static void cmd_version(void)
+{
+    o_str("$V,fw="); o_hex(FW_GIT_HASH, 8);
+    o_str(",proto=1,board=GEPRCF722,params="); o_u32((uint32_t)params_count());
+    o_line();
+}
+
+static void cmd_params(void)
+{
+    cfg_edit_init();
+    flight_config_t def;
+    flight_default_config(&def);
+    char buf[112];
+    for (int i = 0; i < params_count(); i++) {
+        const int n = params_format_machine(&cfg_edit, &def, i, buf, sizeof(buf) - 2);
+        buf[n] = '\r'; buf[n + 1] = '\n';
+        if (!write_raw(buf, (uint32_t)n + 2u)) return;
+    }
+    tud_cdc_write_flush();
+}
+
+static void send_tlm_header(void)
+{
+    char buf[400];
+    const int n = tlm_format_header(buf, sizeof(buf) - 2);
+    buf[n] = '\r'; buf[n + 1] = '\n';
+    write_raw(buf, (uint32_t)n + 2u);
+    tud_cdc_write_flush();
+}
+
+static void send_tlm(void)
+{
+    const flight_t *f = &g_flight;
+    tlm_t t;
+    memset(&t, 0, sizeof(t));
+    t.t_ms = xTaskGetTickCount();
+    t.armed = f->armed;
+    t.failsafe = f->failsafe;
+    t.mode = (uint8_t)f->mode;
+    t.airmode = f->airmode_active;
+    t.calibrated = f->calibrated;
+    t.motor_test = !f->armed && (int32_t)(g_motor_test_until_ms - t.t_ms) > 0;
+    t.arm_block = (uint16_t)(f->arm_block | (g_gyro_ok ? 0u : (unsigned)ARM_BLOCK_GYRO_FAIL));
+    for (int a = 0; a < 3; a++) {
+        t.att_deg[a] = f->attitude_deg[a];
+        t.gyro_dps[a] = f->gyro_f[a];
+        t.acc_g[a] = f->acc_f[a];
+        t.setpoint_dps[a] = f->setpoint[a];
+    }
+    t.throttle = f->throttle;
+    for (int m = 0; m < 4; m++) { t.motor[m] = f->dshot[m]; t.out[m] = g_motor_out[m]; }
+    for (int c = 0; c < 8; c++) t.rc[c] = g_rc_channels[c];
+    t.link_quality = g_link_quality;
+    t.vbat_v = g_vbat_volts;
+    t.loop_avg_x10 = g_loop_us_avg_x10;
+    t.loop_max_us = g_loop_us_max;
+    t.rx_uart = g_rx_uart;
+    t.rx_frames = g_rc_frames;
+    t.rx_crc_errors = g_rc_crc_errors;
+    char buf[400];
+    const int n = tlm_format(&t, buf, sizeof(buf) - 2);
+    buf[n] = '\r'; buf[n + 1] = '\n';
+    write_raw(buf, (uint32_t)n + 2u);
+    tud_cdc_write_flush();
+}
+
+static void cmd_stream(char *args)
+{
+    float hz;
+    if (!next_number(args, &hz) || hz < 0.0f || hz > 100.0f) { say("ERR Aufruf: stream <0-100>"); return; }
+    if (hz < 0.5f) { stream_period_ms = 0; say("OK"); return; }
+    stream_period_ms = (uint32_t)(1000.0f / hz + 0.5f);
+    if (stream_period_ms < 10u) stream_period_ms = 10u;
+    send_tlm_header();
+    stream_next = xTaskGetTickCount();
 }
 
 static void cmd_acccal(void)
@@ -335,7 +497,9 @@ static void cmd_info(void)
     o_str(" calibrated="); o_u32(g_flight.calibrated); o_str(" gyro_ok="); o_u32(g_gyro_ok);
     o_str(" mode="); o_str(g_flight.mode == MODE_ANGLE ? "ANGLE" : "RATE");
     o_str(" loop_overruns="); o_u32(g_loop_overruns); o_line();
-    o_str("rx frames="); o_u32(g_rc_frames); o_str(" crc_errors="); o_u32(g_rc_crc_errors);
+    o_str("rx uart="); o_u32(g_rx_uart);
+    o_str(g_rx_uart ? "" : " (suche...)");
+    o_str(" frames="); o_u32(g_rc_frames); o_str(" crc_errors="); o_u32(g_rc_crc_errors);
     o_str(" lq="); o_u32(g_link_quality); o_line();
     o_str("loop avg_us="); o_fix((float)g_loop_us_avg_x10 / 10.0f, 1);
     o_str(" max_us="); o_u32(g_loop_us_max);
@@ -344,7 +508,8 @@ static void cmd_info(void)
     o_str(g_cfg_new_pending ? " (Aenderung wartet auf disarm)" : ""); o_line();
     o_str("airmode="); o_u32(g_flight.airmode_active);
     o_str(" runaway_triggered="); o_u32(g_flight.runaway_triggered); o_line();
-    o_str("vbat "); o_fix(g_vbat_volts, 2); o_line();
+    o_str("vbat "); o_fix(g_vbat_volts, 2); o_str(" cells="); o_u32(g_battery_cells); o_line();
+    o_str("arm_block 0x"); o_hex(g_flight.arm_block, 4); o_line();
 }
 
 static void cmd_status(void)
@@ -369,6 +534,7 @@ static void cmd_status(void)
 
 static void cmd_live(void)
 {
+    stream_period_ms = 0;
     say("LIVE (beliebige Taste beendet)");
     while (tud_cdc_connected()) {
         if (tud_cdc_available()) {
@@ -445,6 +611,11 @@ static void cmd_erase(bool all)
 static void cmd_reboot(bool dfu)
 {
     if (refuse_if_armed()) return;
+    if (dfu && watchdog_running()) {
+        /* der Watchdog wuerde den Bootloader nach 100 ms zuruecksetzen */
+        say("ERR dfu: seit dem Einschalten schon gearmt - USB und Akku kurz trennen, dann nochmals");
+        return;
+    }
     say(dfu ? "OK dfu" : "OK reboot");
     vTaskDelay(pdMS_TO_TICKS(100));
     system_reboot(dfu);
@@ -470,7 +641,14 @@ static void handle_line(char *line)
     else if (!strcmp(line, "diff")) cmd_diff();
     else if (!strcmp(line, "defaults")) cmd_defaults();
     else if (!strncmp(line, "motor ", 6)) cmd_motor(line + 6);
+    else if (!strncmp(line, "motors ", 7)) cmd_motors(line + 7);
     else if (!strcmp(line, "acccal")) cmd_acccal();
+    else if (!strcmp(line, "gyrocal")) cmd_gyrocal();
+    else if (!strcmp(line, "version")) cmd_version();
+    else if (!strcmp(line, "params")) cmd_params();
+    else if (!strncmp(line, "stream ", 7)) cmd_stream(line + 7);
+    else if (!strcmp(line, "echo")) say("");
+    else if (!strncmp(line, "echo ", 5)) say(line + 5);
     else { o_str("ERR unbekannt: "); o_str(line); o_line(); }
 }
 
@@ -483,11 +661,30 @@ static void cli_task(void *arg)
 {
     (void)arg;
     flash_set_wait_hook(flash_wait_hook);
-    char line[64];
+    char line[96];
     uint32_t len = 0;
+    bool was_connected = false;
     for (;;) {
-        if (!tud_cdc_connected() || !tud_cdc_available()) {
+        const bool connected = tud_cdc_connected();
+        if (!connected) {
+            if (was_connected) {
+                /* Configurator/Terminal geschlossen oder Kabel ab: Motortest sofort aus */
+                motor_test_stop();
+                stream_period_ms = 0;
+                len = 0;
+            }
+            was_connected = false;
             vTaskDelay(pdMS_TO_TICKS(5));
+            continue;
+        }
+        was_connected = true;
+        if (stream_period_ms && (int32_t)(xTaskGetTickCount() - stream_next) >= 0) {
+            stream_next += pdMS_TO_TICKS(stream_period_ms);
+            if ((int32_t)(xTaskGetTickCount() - stream_next) > 0) stream_next = xTaskGetTickCount();
+            send_tlm();
+        }
+        if (!tud_cdc_available()) {
+            vTaskDelay(pdMS_TO_TICKS(2));
             continue;
         }
         uint8_t c;

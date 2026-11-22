@@ -16,7 +16,8 @@ auf **derselben Hardware**. Dadurch unterscheidet sich im Vergleich nur die Soft
 |---|---|---|
 | Takt 216 MHz (Quarz 8 MHz → PLL, Over-Drive; Notbetrieb mit HSI) | `src/board/system.c` | fertig |
 | ICM-42688-P über SPI3, 1 kHz, Data-Ready-Interrupt | `src/board/icm42688.c` | fertig |
-| CRSF-Empfang über UART2 (420 000 Baud) | `src/board/rx_uart.c`, `src/core/crsf.c` | fertig |
+| CRSF-Empfang (420 000 Baud), UART 1/2/3/4/6 **automatisch gesucht** | `src/board/rx_uart.c`, `src/core/crsf.c` | fertig |
+| CRSF-Telemetrie: Akkuspannung, Rest %, Flugmodus auf der Fernsteuerung | `src/core/crsf.c`, `src/app/main.c` | fertig |
 | DShot300 auf 4 Motoren (TIM3 + DMA-Burst) | `src/board/dshot_tim3.c`, `src/core/dshot.c` | fertig |
 | Lageschätzung Mahony | `src/core/mahony.c` | fertig |
 | PID je Achse (Betaflight-Skalierung, D auf Istwert, Feedforward, I-Term-Relax, Anti-Windup, TPA) | `src/core/pid.c` | fertig |
@@ -27,11 +28,15 @@ auf **derselben Hardware**. Dadurch unterscheidet sich im Vergleich nur die Soft
 | Simulation: Firmware-Kern im Physikmodell | `tools/sim` ([README](tools/sim/README.md)) | fertig |
 | Quad-X-Mischer mit Desaturierung | `src/core/mixer.c` | fertig |
 | Rate- und Angle-Mode, Arming, Failsafe, Gyro-Kalibrierung | `src/core/flight.c` | fertig |
+| Arming-Sperrgründe als Bitmaske (wie Betaflight «arming disable flags») | `src/core/flight.c` | fertig |
+| Motor-Zuordnung `motor1_out … motor4_out` (wie Betaflight `resource MOTOR`) | `src/core/flight.c` | fertig |
 | Watchdog, Fehler-Handler (Motoren aus) | `src/board/system.c`, `src/app/main.c` | fertig |
-| Akkuspannung, LEDs, Summer | `src/board/peripherals.c` | fertig, Werte prüfen |
+| Akkuspannung (`vbat_scale` einstellbar), Zellenzahl beim Einstecken, LEDs, Summer | `src/board/peripherals.c`, `src/app/main.c` | fertig, Werte prüfen |
 | Logging in den 16-MB-Flash (W25Q128, SPI2), 1 kHz, nur armed | `src/core/blackbox.c`, `src/core/logrec.c`, `src/board/flash_w25q.c` | fertig |
 | USB (virtueller COM-Port): info, live, dump, erase, dfu | `src/app/usb_cli.c` (TinyUSB) | fertig |
 | PC-Werkzeug: Download → CSV, Live-Anzeige, DFU | `tools/fc_cli.py`, `tools/analysis/buildb_log.py` | fertig |
+| **Configurator** im Browser (wie Betaflight Configurator) | `tools/configurator` ([README](tools/configurator/README.md)) | fertig |
+| Live-Daten für den Configurator (`stream`, `params`, `version`) | `src/core/telemetry.c`, `src/app/usb_cli.c` | fertig |
 | Bidirektionales DShot / RPM-Filter | – | optional |
 
 ## Aufbau
@@ -44,6 +49,7 @@ tests/       Host-Tests der Kernmodule
 lib/         FreeRTOS-Kernel, CMSIS, TinyUSB (Git-Submodule)
 docs/        Bodentest
 tools/fc_cli.py  USB-Werkzeug (Download, Löschen, Live, DFU)
+tools/configurator/  Configurator im Browser (Web Serial), Demo-Modus, Tests
 tools/analysis/  Python-Auswertung A/B (Sprungantwort, Kennzahlen, Vergleich), Log-Decoder
 tools/sim/       Simulation (Software-in-the-Loop) und Aliasing-Demo
 docs/            Bodentest, Abgleich mit Betaflight/INAV/PX4/dRehmFlight
@@ -67,7 +73,7 @@ Quelle: Betaflight-Target `GEPRCF722` (`betaflight/config`, `configs/GEPR/GEPRCF
 | Funktion | Pins |
 |---|---|
 | Gyro ICM-42688-P | SPI3: SCK PC10, MISO PC11, MOSI PC12; CS PA15; INT PC3; Ausrichtung CW180 |
-| Empfänger | UART2: TX PA2, RX PA3 **[prüfen: UART des RP3 in Betaflight → Ports]** |
+| Empfänger | automatisch: UART1 PA9/PA10, UART2 PA2/PA3, UART3 PB10/PB11, UART4 PA0/PA1, UART6 PC6/PC7 (Einstellung `rx_uart`) |
 | Motoren | M1 PB4, M2 PB5, M3 PB0, M4 PB1 (TIM3 CH1–4), DMA1 Stream 2 Kanal 5 |
 | Akkuspannung | PC0 (ADC1 IN10) |
 | LEDs / Summer | PA13, PA14 / PC13 |
@@ -85,8 +91,9 @@ macOS: `brew install cmake` und die Arm GNU Toolchain von developer.arm.com
 git clone --recursive https://github.com/Ruben0241/diy_drone
 cd diy_drone
 
-# Tests der Kernmodule auf dem PC
-cmake -S tests -B build-tests && cmake --build build-tests && ./build-tests/test_core
+# Tests der Kernmodule auf dem PC (schreibt Beispieldateien nach build-tests/)
+cmake -S tests -B build-tests && cmake --build build-tests && ./build-tests/test_core build-tests/sample_log.bin
+node tools/configurator/test/test_protocol.js     # Configurator gegen die Firmware-Ausgaben
 
 # Firmware
 cmake -S . -B build && cmake --build build
@@ -106,6 +113,16 @@ cmake -S . -B build && cmake --build build
 
 **Zurück zu Betaflight:** Firmware Flasher → Board `GEPRCF722` → Flashen → im CLI die
 gespeicherte `diff all` einfügen → `save`.
+
+## Configurator
+
+```bash
+python tools/configurator/start_configurator.py     # oder macOS: tools/configurator/start.command doppelklicken
+```
+
+Öffnet Chrome mit dem Configurator: Lage in 3D, Arming-Status, Empfänger, Motortest,
+PID/Rates/Filter, Live-Diagramme, Bodentest-Assistent, alle Einstellungen, Flugdaten-Download, CLI.
+Ohne Drohne: Knopf «Demo». Details: [tools/configurator/README.md](tools/configurator/README.md).
 
 ## Flugdaten herunterladen (Build B)
 
@@ -155,10 +172,15 @@ python tools/fc_cli.py term
 | `runaway_prevention` | an | Werte aus Betaflight `core.c` |
 | `gyro_sign_*`, `stick_sign_*` | +1 (Yaw-Stick −1) | Korrektur nach Bodentest |
 | Failsafe | 250 ms ohne Paket | Motoren sofort aus |
+| `motor1_out` … `motor4_out` | 1, 2, 3, 4 | Ausgang für M1…M4; Assistent im Configurator (Tab Motoren) |
+| `rx_uart` | 0 (automatisch) | sonst 1, 2, 3, 4 oder 6; wirkt nach Neustart |
+| `crsf_telemetry` | 1 | Akku und Flugmodus an die Fernsteuerung (RxBt, Bat%, FM) |
+| `vbat_scale` / `vbat_warn_cell` | 110 / 3.50 V | wie Betaflight; Warnton unter 3.5 V pro Zelle |
 | Kanäle | 1 Roll, 2 Pitch, 3 Gas, 4 Yaw, 5 Arm, 6 Angle-Mode | ELRS/EdgeTX «AETR» |
 
 Weitere Befehle: `motor 1 10` (Motor 1 mit 10 %, nur disarmed, Propeller ab!), `motor stop`,
-`acccal` (Drohne waagrecht hinstellen).
+`acccal` (Drohne waagrecht hinstellen), `gyrocal`. Für den Configurator: `version`, `params`,
+`stream <hz>`, `motors a b c d [ms]`, `echo <text>` (Beschreibung in `src/app/usb_cli.c`).
 
 **Unterschiede zu Betaflight** und was bewusst fehlt: [docs/vergleich_software.md](docs/vergleich_software.md)
 (dort auch die CLI-Liste, um Betaflight für den Vergleich auf «reinen PID» zu stellen).
@@ -166,11 +188,17 @@ Weitere Befehle: `motor 1 10` (Motor 1 mit 10 %, nur disarmed, Propeller ab!), `
 ## Sicherheit
 
 - Erste Tests ohne Propeller, danach gefesselt (Kap. 3.4.7).
-- Arming nur mit Gas unten, Schalter-Wechsel aus → ein, Drohne flach (< 25°) und Gyro kalibriert.
+- Arming nur mit Gas unten, Schalter-Wechsel aus → ein, Drohne flach (< 25°) und Gyro kalibriert,
+  kein Motortest aktiv, gültige Motor-Zuordnung. Warum gerade nicht gearmt werden kann, zeigt der
+  Configurator (Übersicht) bzw. `info` (`arm_block`).
+- Motortest über USB: max. 40 %, stoppt nach Ablauf der Zeit (Configurator: 0.6 s ohne Nachricht)
+  und sofort, wenn USB getrennt wird.
 - Failsafe, Gyro-Ausfall, Absturz der Software (HardFault, Assert, Stack-Überlauf) und Watchdog
   schalten die Motoren aus. Nach einem Gyro-Ausfall muss der Arm-Schalter neu betätigt werden.
 - Piepsen beim Start: 2× = Quarz nicht angelaufen (USB unzuverlässig), 4× = kein Flash gefunden,
   dauernd kurz alle 0.5 s = Gyro nicht gefunden oder Software-Fehler.
+- Empfänger: Bis ein UART gültige CRSF-Pakete liefert, gilt Failsafe (Motoren aus). Erst danach
+  sendet die Firmware auf diesem UART (Telemetrie); die anderen UARTs werden abgeschaltet.
 
 ## Hinweis zur Eigenleistung
 

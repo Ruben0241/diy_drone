@@ -41,7 +41,10 @@ Verglichen (Stand Oktober 2026):
 | Airmode | ✔ ab 25 % Gas | ✔ `airmode_start_throttle_percent` 25 |
 | Runaway-Schutz | ✔ Werte aus `core.c` | ✔ |
 | Angle-Mode | ✔ P auf Winkel, 60° | ✔ (mit Feedforward, Erdbezug) |
-| Arming-Sperren | Gas, Lage, Kalibrierung, Schalter, USB-Befehle | viele weitere (GPS, OSD, …) |
+| Arming-Sperren | Gas, Lage, Kalibrierung, Schalter, USB-Befehle, Motortest, Motor-Zuordnung; Gründe als Bitmaske (`arm_block`) | «arming disable flags», viele weitere (GPS, OSD, …) |
+| Lageschätzung am Boden | 10-fache ACC-Gewichtung solange disarmed | `imuUseFastGains` (10-fach, disarmed, erste 20 s) |
+| Telemetrie | CRSF: Akkuspannung/Rest, Flugmodus | CRSF: viele Sensoren |
+| Empfänger-Port | automatische Suche auf UART 1/2/3/4/6 oder fest (`rx_uart`) | fest (Ports-Tab) |
 | Failsafe | sofort Motoren aus (250 ms) | 2 Stufen (Landen, dann aus) |
 | Regelfrequenz | 1 kHz | 4–8 kHz |
 
@@ -54,7 +57,7 @@ Verglichen (Stand Oktober 2026):
 | Schubkurve linearisieren, Spannungskompensation, Dynamic Idle | dito |
 | Crash-Recovery, Horizon, Acro-Trainer, Launch-Control, EZ-Landing | für die Messflüge nicht nötig |
 | 2-stufiges Failsafe | Drohne fliegt nur in Sichtweite über weichem Boden; sofort aus ist einfacher zu prüfen |
-| GPS, OSD, MSP, Konfigurator | nicht Teil der Fragestellung |
+| GPS, OSD, MSP | nicht Teil der Fragestellung. Statt MSP ein einfaches Textprotokoll mit eigenem Configurator (`tools/configurator`) |
 
 ## 4. Betaflight auf «reinen PID» stellen (Build A, Vergleich 1)
 
@@ -133,5 +136,5 @@ save
 
 Alle Bausteine, die in **allen** vier Programmen vorkommen (P, I mit Grenze, I-Sperre am Boden,
 D, Mischer, Begrenzung), sind umgesetzt; ebenso die Schutzfunktionen von Betaflight (Airmode,
-Runaway, Arming-Sperren). Getestet in `tests/test_core.c` (450 Prüfungen) und in der
+Runaway, Arming-Sperren). Getestet in `tests/test_core.c` (544 Prüfungen) und in der
 Simulation (`tools/sim/test_sim.py`).

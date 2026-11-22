@@ -17,6 +17,8 @@
 #include "params.h"
 #include "pid.h"
 #include "rates.h"
+#include "telemetry.h"
+#include <stdlib.h>
 
 static int failures = 0;
 static int checks = 0;
@@ -581,6 +583,279 @@ static void test_flight_features(void)
     CHECK(!flight_apply_config(&f, &cfg));
 }
 
+/* ---------- Arming-Sperrgruende, Motor-Zuordnung, Gyro-Kalibrierung ---------- */
+
+static void test_arm_block_and_outputs(void)
+{
+    printf("Arming-Sperrgruende, Motor-Zuordnung, Gyro-Kalibrierung\n");
+    flight_config_t cfg;
+    flight_default_config(&cfg);
+    flight_t f;
+    flight_input_t in;
+    memset(&in, 0, sizeof(in));
+    in.acc_g[2] = 1.0f;
+
+    /* ohne Empfaenger: NO_RX + SWITCH + GYRO_CAL */
+    flight_init(&f, &cfg);
+    run(&f, &in, 1);
+    CHECK(f.arm_block & ARM_BLOCK_NO_RX);
+    CHECK(f.arm_block & ARM_BLOCK_SWITCH);
+    CHECK(f.arm_block & ARM_BLOCK_GYRO_CAL);
+
+    /* Empfaenger da, Schalter aus, kalibriert: keine Sperre */
+    in.rc_valid = true;
+    set_sticks(&in, CRSF_CHANNEL_MIN, CRSF_CHANNEL_MIN);
+    run(&f, &in, 1100);
+    CHECK(f.arm_block == 0);
+
+    /* Gas oben */
+    in.channels[CH_THROTTLE] = 1000;
+    run(&f, &in, 1);
+    CHECK(f.arm_block == ARM_BLOCK_THROTTLE);
+    in.channels[CH_THROTTLE] = CRSF_CHANNEL_MIN;
+
+    /* USB-Sperre, ACC-Kalibrierung, Motortest */
+    in.arm_inhibit = true; run(&f, &in, 1);
+    CHECK(f.arm_block == ARM_BLOCK_USB);
+    in.arm_inhibit = false;
+    in.motor_test = true; run(&f, &in, 1);
+    CHECK(f.arm_block == ARM_BLOCK_MOTOR_TEST);
+    /* Schalter waehrend Motortest eingeschaltet -> darf nach dem Test NICHT von selbst armen */
+    set_sticks(&in, CRSF_CHANNEL_MIN, CRSF_CHANNEL_MAX);
+    run(&f, &in, 5);
+    CHECK(!f.armed);
+    in.motor_test = false;
+    run(&f, &in, 5);
+    CHECK(!f.armed && (f.arm_block & ARM_BLOCK_SWITCH));
+    set_sticks(&in, CRSF_CHANNEL_MIN, CRSF_CHANNEL_MIN);
+    run(&f, &in, 2);
+    set_sticks(&in, CRSF_CHANNEL_MIN, CRSF_CHANNEL_MAX);
+    run(&f, &in, 2);
+    CHECK(f.armed && f.arm_block == 0);
+    set_sticks(&in, CRSF_CHANNEL_MIN, CRSF_CHANNEL_MIN);
+    run(&f, &in, 2);
+
+    /* schraeg */
+    flight_init(&f, &cfg);
+    in.acc_g[0] = 0.0f; in.acc_g[1] = 0.7f; in.acc_g[2] = 0.7f;    /* ca. 45 Grad */
+    run(&f, &in, 2000);                                     /* 2 s reichen (schnelle Gewichtung am Boden) */
+    CHECK(fabsf(f.attitude_deg[0]) > 40.0f);
+    CHECK(f.arm_block & ARM_BLOCK_ANGLE);
+    set_sticks(&in, CRSF_CHANNEL_MIN, CRSF_CHANNEL_MAX);
+    run(&f, &in, 5);
+    CHECK(!f.armed);
+    in.acc_g[1] = 0.0f; in.acc_g[2] = 1.0f;
+    set_sticks(&in, CRSF_CHANNEL_MIN, CRSF_CHANNEL_MIN);
+
+    /* Gyro neu kalibrieren: nur disarmed */
+    flight_init(&f, &cfg);
+    run(&f, &in, 1100);
+    CHECK(f.calibrated);
+    in.gyro_dps[0] = 1.5f;
+    CHECK(flight_start_gyro_calibration(&f));
+    CHECK(!f.calibrated && (f.arm_block == 0 || 1));
+    run(&f, &in, 1);
+    CHECK(f.arm_block & ARM_BLOCK_GYRO_CAL);
+    run(&f, &in, 1100);
+    CHECK(f.calibrated);
+    CHECK_NEAR(f.gyro_bias[0], 1.5f, 1e-3);
+    in.gyro_dps[0] = 0.0f;
+    arm_now(&f, &in, CRSF_CHANNEL_MIN);
+    CHECK(f.armed);
+    CHECK(!flight_start_gyro_calibration(&f));
+    set_sticks(&in, CRSF_CHANNEL_MIN, CRSF_CHANNEL_MIN);
+    run(&f, &in, 2);
+
+    /* Motor-Zuordnung */
+    CHECK(flight_motor_map_valid(&cfg));
+    flight_config_t c2 = cfg;
+    c2.motor_out[0] = 3; c2.motor_out[1] = 1; c2.motor_out[2] = 4; c2.motor_out[3] = 2;
+    CHECK(flight_motor_map_valid(&c2));
+    flight_init(&f, &c2);
+    f.dshot[0] = 100; f.dshot[1] = 200; f.dshot[2] = 300; f.dshot[3] = 400;
+    uint16_t out[4];
+    flight_map_outputs(&f, out);
+    CHECK(out[2] == 100 && out[0] == 200 && out[3] == 300 && out[1] == 400);
+    c2.motor_out[3] = 1;                                   /* doppelt -> ungueltig */
+    CHECK(!flight_motor_map_valid(&c2));
+    flight_init(&f, &c2);
+    f.dshot[0] = 100;
+    flight_map_outputs(&f, out);
+    CHECK(out[0] == 0 && out[1] == 0 && out[2] == 0 && out[3] == 0);
+    run(&f, &in, 1100);
+    CHECK(f.arm_block & ARM_BLOCK_MOTOR_MAP);
+    set_sticks(&in, CRSF_CHANNEL_MIN, CRSF_CHANNEL_MAX);
+    run(&f, &in, 5);
+    CHECK(!f.armed);
+
+    /* Parameter der Zuordnung */
+    flight_config_t a;
+    flight_default_config(&a);
+    CHECK(params_set(&a, "motor1_out", "4"));
+    CHECK(!params_set(&a, "motor1_out", "2.5"));
+    CHECK(!params_set(&a, "motor1_out", "5"));
+    CHECK(params_set(&a, "rx_uart", "6"));
+    CHECK(!params_set(&a, "rx_uart", "5"));
+    CHECK(params_set(&a, "rx_uart", "0"));
+    CHECK(params_set(&a, "vbat_scale", "112"));
+    CHECK(a.vbat_scale == 112.0f);
+    /* p_roll darf weiterhin Nachkommastellen haben (nur die Zuordnungen sind ganzzahlig) */
+    CHECK(params_set(&a, "gyro_lpf1_hz", "87.5"));
+}
+
+/* ---------- Schalter wie Betaflight aux (Kanal + Bereich) ---------- */
+
+static void test_switches(void)
+{
+    printf("Arm- und Angle-Schalter (Kanal, Bereich)\n");
+    CHECK_NEAR(crsf_to_us(172), 987.5, 0.01);
+    CHECK_NEAR(crsf_to_us(992), 1500.0, 0.01);
+    CHECK_NEAR(crsf_to_us(1811), 2011.875, 0.001);
+    uint16_t ch[CRSF_NUM_CHANNELS];
+    for (int i = 0; i < 16; i++) ch[i] = 992;
+    ch[6] = 172;                                     /* Kanal 7 unten */
+    CHECK(flight_switch_active(ch, 7, 900, 1125));
+    CHECK(!flight_switch_active(ch, 7, 1700, 2100));
+    CHECK(!flight_switch_active(ch, 0, 900, 2100)); /* aus */
+    CHECK(!flight_switch_active(ch, 17, 900, 2100));
+
+    /* Rubens Betaflight-Einstellung: Arm Kanal 5 1700-2100, Angle Kanal 7 unten (900-1125) */
+    flight_config_t cfg;
+    flight_default_config(&cfg);
+    CHECK(params_set(&cfg, "angle_ch", "7"));
+    CHECK(params_set(&cfg, "angle_min_us", "900"));
+    CHECK(params_set(&cfg, "angle_max_us", "1125"));
+    CHECK(!params_set(&cfg, "angle_ch", "6.5"));
+    flight_t f;
+    flight_init(&f, &cfg);
+    flight_input_t in;
+    memset(&in, 0, sizeof(in));
+    in.acc_g[2] = 1.0f;
+    in.rc_valid = true;
+    set_sticks(&in, CRSF_CHANNEL_MIN, CRSF_CHANNEL_MIN);
+    in.channels[6] = 1811;                           /* Kanal 7 oben -> Rate */
+    run(&f, &in, 1100);
+    CHECK(f.mode == MODE_RATE);
+    in.channels[6] = 172;                            /* unten -> Angle */
+    run(&f, &in, 2);
+    CHECK(f.mode == MODE_ANGLE);
+    /* Arm bei 1600 us: unter 1700 -> nicht armen */
+    in.channels[CH_ARM] = 1440;                      /* 1405 us */
+    run(&f, &in, 3);
+    in.channels[CH_ARM] = 1306;                      /* ca. 1696 us */
+    run(&f, &in, 3);
+    CHECK(!f.armed);
+    in.channels[CH_ARM] = 1811;
+    run(&f, &in, 3);
+    CHECK(f.armed);
+}
+
+/* ---------- CRSF-Telemetrie und Live-Daten fuer den Configurator ---------- */
+
+static char sample_dir[512];   /* Ordner fuer Beispieldateien (wie sample_log.bin), leer = keine */
+
+static FILE *sample_file(const char *name)
+{
+    if (!sample_dir[0]) return NULL;
+    char path[600];
+    snprintf(path, sizeof(path), "%s/%s", sample_dir, name);
+    return fopen(path, "w");
+}
+
+static void test_telemetry(void)
+{
+    printf("CRSF-Telemetrie, Live-Daten, maschinenlesbare Parameter\n");
+    uint8_t fr[CRSF_TELEMETRY_MAX];
+    uint32_t n = crsf_build_battery(fr, 15.24f, 0.0f, 0, 80);
+    CHECK(n == 12);
+    CHECK(fr[0] == 0xC8 && fr[1] == 10 && fr[2] == CRSF_FRAMETYPE_BATTERY);
+    CHECK(fr[3] == 0 && fr[4] == 152);                        /* 15.2 V, Big Endian */
+    CHECK(fr[10] == 80);
+    CHECK(fr[11] == crsf_crc8(&fr[2], 9));
+    /* eigener Parser muss das Paket als gueltig erkennen */
+    crsf_parser_t p;
+    crsf_parser_init(&p);
+    uint16_t ch[CRSF_NUM_CHANNELS];
+    crsf_result_t r = CRSF_NONE;
+    for (uint32_t i = 0; i < n; i++) r = crsf_parser_feed(&p, fr[i], ch, NULL);
+    CHECK(r == CRSF_OTHER && p.crc_errors == 0);
+    n = crsf_build_flight_mode(fr, "ACRO");
+    CHECK(n == 4 + 5);
+    CHECK(fr[2] == CRSF_FRAMETYPE_FLIGHT_MODE && fr[3] == 'A' && fr[7] == 0);
+    for (uint32_t i = 0; i < n; i++) r = crsf_parser_feed(&p, fr[i], ch, NULL);
+    CHECK(r == CRSF_OTHER && p.crc_errors == 0);
+
+    /* Akku-Schaetzung: 4S (CNHL 1800 mAh) */
+    CHECK(tlm_battery_cells(16.8f) == 4 && tlm_battery_cells(14.0f) == 4 && tlm_battery_cells(13.3f) == 4);
+    CHECK(tlm_battery_cells(12.6f) == 3 && tlm_battery_cells(0.3f) == 0 && tlm_battery_cells(25.2f) == 6);
+    CHECK(tlm_battery_percent(16.8f) == 100 && tlm_battery_percent(13.2f) == 0);
+    CHECK(tlm_battery_percent(15.0f) > 40 && tlm_battery_percent(15.0f) < 60);
+    CHECK(tlm_battery_cells(9.0f) == 3 && tlm_battery_cells(21.0f) == 5);
+    CHECK(tlm_battery_percent_cells(12.0f, 4) == 0);
+
+    /* Live-Zeile: gleich viele Felder wie die Kopfzeile, Werte skaliert */
+    char head[512], line[512];
+    tlm_format_header(head, sizeof(head));
+    tlm_t t;
+    memset(&t, 0, sizeof(t));
+    t.t_ms = 12345; t.armed = 1; t.arm_block = ARM_BLOCK_THROTTLE;
+    t.att_deg[0] = -12.34f; t.gyro_dps[2] = 250.06f; t.acc_g[2] = 0.998f;
+    t.throttle = 0.5f; t.motor[3] = 2047; t.rc[4] = 1811; t.vbat_v = 16.8f;
+    t.rx_uart = 2; t.out[1] = 99;
+    const int len = tlm_format(&t, line, sizeof(line));
+    CHECK(len > 0 && len < 400);
+    int commas_h = 0, commas_t = 0;
+    for (const char *c = head; *c; c++) commas_h += (*c == ',');
+    for (const char *c = line; *c; c++) commas_t += (*c == ',');
+    CHECK(commas_h == commas_t);
+    CHECK(strncmp(line, "$T,12345,1,", 11) == 0);
+    /* einzelne Felder ueber den Namen pruefen */
+    {
+        char hb[512], lb[512];
+        strcpy(hb, head); strcpy(lb, line);
+        const char *want[] = { "arm_block", "att_r", "gyro_y", "acc_z", "thr", "m4", "ch5",
+                               "vbat_mv", "rx_uart", "out2" };
+        const long val[] = { ARM_BLOCK_THROTTLE, -123, 2501, 998, 500, 2047, 1811, 16800, 2, 99 };
+        char *names[64]; long vals[64]; int nn = 0, nv = 0;
+        for (char *tok = strtok(hb, ","); tok && nn < 64; tok = strtok(NULL, ",")) names[nn++] = tok;
+        for (char *tok = strtok(lb, ","); tok && nv < 64; tok = strtok(NULL, ",")) vals[nv++] = atol(tok);
+        CHECK(nn == nv);
+        for (unsigned k = 0; k < sizeof(want) / sizeof(want[0]); k++) {
+            int idx = -1;
+            for (int i = 0; i < nn; i++) if (!strcmp(names[i], want[k])) idx = i;
+            CHECK(idx > 0);
+            if (idx > 0) { checks++; if (vals[idx] != val[k]) { failures++; printf("  FEHLER Feld %s = %ld, erwartet %ld\n", want[k], vals[idx], val[k]); } }
+        }
+    }
+    /* Beispielzeilen fuer den Test des Configurators (tools/configurator/test) */
+    {
+        FILE *fp = sample_file("tlm_sample.txt");
+        if (fp) { fprintf(fp, "%s\n%s\n", head, line); fclose(fp); }
+    }
+
+    /* Parameterliste: "$P,name,wert,min,max,nachkomma,standard" */
+    flight_config_t cfg, def;
+    flight_default_config(&cfg);
+    flight_default_config(&def);
+    cfg.pid_p[0] = 52;
+    char buf[96];
+    const int i = params_find("p_roll");
+    params_format_machine(&cfg, &def, i, buf, sizeof(buf));
+    CHECK(strcmp(buf, "$P,p_roll,52,0.00,250.00,0,45") == 0);
+    params_format_machine(&cfg, &def, params_find("acc_bias_x"), buf, sizeof(buf));
+    CHECK(strcmp(buf, "$P,acc_bias_x,0.0000,-0.5000,0.5000,4,0.0000") == 0);
+    {
+        FILE *fp = sample_file("params_sample.txt");
+        if (fp) {
+            for (int k = 0; k < params_count(); k++) {
+                params_format_machine(&cfg, &def, k, buf, sizeof(buf));
+                fprintf(fp, "%s\n", buf);
+            }
+            fclose(fp);
+        }
+    }
+}
+
 /* ---------- Einstellungen ---------- */
 
 static void test_params(void)
@@ -786,6 +1061,11 @@ static void test_blackbox(void)
 
 int main(int argc, char **argv)
 {
+    if (argc > 1) {
+        strncpy(sample_dir, argv[1], sizeof(sample_dir) - 1);
+        char *slash = strrchr(sample_dir, '/');
+        if (slash) *slash = 0; else strcpy(sample_dir, ".");
+    }
     test_crsf();
     test_dshot();
     test_pid();
@@ -794,6 +1074,9 @@ int main(int argc, char **argv)
     test_mahony();
     test_flight();
     test_flight_features();
+    test_arm_block_and_outputs();
+    test_switches();
+    test_telemetry();
     test_params();
     test_logrec(argc > 1 ? argv[1] : NULL);
     test_blackbox();

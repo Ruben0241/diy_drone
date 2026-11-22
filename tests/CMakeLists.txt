@@ -18,6 +18,7 @@ add_executable(test_core
     ${CORE}/mixer.c
     ${CORE}/pid.c
     ${CORE}/pt1.c
+    ${CORE}/telemetry.c
 )
 target_include_directories(test_core PRIVATE ${CORE})
 target_compile_options(test_core PRIVATE -Wall -Wextra -Werror)

@@ -50,6 +50,17 @@ void          crsf_parser_init(crsf_parser_t *p);
 crsf_result_t crsf_parser_feed(crsf_parser_t *p, uint8_t byte,
                                uint16_t channels[CRSF_NUM_CHANNELS],
                                crsf_link_stats_t *stats);
+/* Telemetrie FC -> Empfaenger -> Fernsteuerung (EdgeTX zeigt sie als Sensoren an).
+ * Rueckgabe: Laenge des Pakets in Byte (inkl. Sync und CRC). */
+#define CRSF_FRAMETYPE_BATTERY      0x08u
+#define CRSF_FRAMETYPE_FLIGHT_MODE  0x21u
+#define CRSF_TELEMETRY_MAX          32u
+/* Akku: Spannung [V], Strom [A], verbraucht [mAh], Rest [%] */
+uint32_t crsf_build_battery(uint8_t out[CRSF_TELEMETRY_MAX], float volts, float amps,
+                            uint32_t mah, uint8_t percent);
+/* Flugmodus als Text (max. 15 Zeichen), z. B. "ACRO", "ANGL", "!ARM" */
+uint32_t crsf_build_flight_mode(uint8_t out[CRSF_TELEMETRY_MAX], const char *mode);
+
 /* Kanalwert -> -1 ... +1 (Mitte = 0) bzw. 0 ... 1 */
 float crsf_to_bipolar(uint16_t v);
 float crsf_to_unipolar(uint16_t v);

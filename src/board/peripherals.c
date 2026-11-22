@@ -46,12 +46,12 @@ void vbat_init(void)
     delay_us(10);
 }
 
-float vbat_read_volts(void)
+float vbat_read_volts(float scale)
 {
     ADC1->SR = 0;
     ADC1->CR2 |= ADC_CR2_SWSTART;
     uint32_t timeout = 100000;
     while (!(ADC1->SR & ADC_SR_EOC) && --timeout) { }
     const float raw = (float)(ADC1->DR & 0xFFF);
-    return raw / 4095.0f * 3.3f * VBAT_SCALE / 10.0f;
+    return raw / 4095.0f * 3.3f * scale / 10.0f;
 }
