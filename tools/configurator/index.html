@@ -1568,7 +1568,17 @@ async function dumpLogs() {
 }
 function renderFlights() {
   const box = $('flightList'); box.innerHTML = '';
-  if (!S.flights.length) { box.append(el('div', { class: 'muted' }, 'Keine Flüge im Speicher.')); return; }
+  if (!S.flights.length) {
+    box.append(el('div', { class: 'muted' }, S.rawLog && S.rawLog.length
+      ? `Keine Flüge der eigenen Firmware gefunden. Der Speicher enthält ${(S.rawLog.length / 1e6).toFixed(1)} MB anderer Daten (z. B. Betaflight-Blackbox, lesbar mit dem Betaflight Blackbox Explorer).`
+      : 'Keine Flüge im Speicher.'));
+    if (S.rawLog && S.rawLog.length) {
+      const isBf = new TextDecoder().decode(S.rawLog.subarray(0, 64)).includes('Blackbox');
+      box.append(el('div', { class: 'row', style: 'margin-top:10px' }, el('span', { class: 'sp' }),
+        el('button', { class: 'btn primary', onclick: () => download(`${S.logPrefix}${isBf ? '_betaflight.bbl' : '_roh.bin'}`, S.rawLog) }, isBf ? 'Betaflight-Logs speichern (.bbl)' : 'Rohdaten speichern (.bin)')));
+    }
+    return;
+  }
   const tb = el('tbody');
   S.flights.forEach((f, i) => {
     const name = `${S.logPrefix}_B_${String(f.index).padStart(2, '0')}`;
