@@ -191,6 +191,7 @@ static void control_task(void *arg)
             runaway_beep = true;
         }
         if (g_flight.event_armed) {
+            watchdog_init(WATCHDOG_MS);       /* ab dem ersten Armen bis zum Ausschalten */
             g_motor_test_until_ms = now_ms;   /* Motortest beim Armen sofort beenden */
         }
 
@@ -506,7 +507,6 @@ int main(void)
     xTaskCreate(status_task,  "status",  512,  NULL, 1, NULL);
     usb_cli_start();
 
-    watchdog_init(WATCHDOG_MS);
     vTaskStartScheduler();
     fc_fatal_error("scheduler", 0);
     return 0;

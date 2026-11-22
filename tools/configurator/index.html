@@ -963,7 +963,10 @@ async function calibrate(kind) {
 async function reboot(dfu) {
   if (S.tlm?.armed) return;
   if (dfu && !await ask('Bootloader starten?', 'Der Flightcontroller startet im DFU-Modus neu (USB trennt sich). Danach mit dem Betaflight Configurator («Load Firmware [Local]») oder <span class="mono">dfu-util</span> flashen. Aus dem DFU-Modus kommt er durch Aus- und Einstecken.', 'Bootloader')) return;
-  try { await cmd(dfu ? 'dfu' : 'reboot', { timeout: 1500 }); } catch (e) { /* trennt sich */ }
+  try {
+    const err = firstErr(await cmd(dfu ? 'dfu' : 'reboot', { timeout: 1500 }));
+    if (err) { toast(err.replace(/^ERR\s*(dfu:)?\s*/, ''), 'err'); return; }
+  } catch (e) { /* trennt sich */ }
   await disconnect(true);
   toast(dfu ? 'Bootloader gestartet. Jetzt flashen.' : 'Neustart … in ein paar Sekunden neu verbinden.');
 }
@@ -1803,9 +1806,12 @@ async function fwFlash() {
   if (!FW.image) return;
   if (S.connected) {
     /* eigene Firmware: selbst in den Bootloader schicken */
-    try { await cmd('dfu', { timeout: 1500 }); } catch (e) { /* trennt sich */ }
+    try {
+      const err = firstErr(await cmd('dfu', { timeout: 1500 }));
+      if (err) { toast(err.replace(/^ERR\s*(dfu:)?\s*/, ''), 'err'); return; }
+    } catch (e) { /* trennt sich */ }
     await disconnect(true);
-    await new Promise(r => setTimeout(r, 2500));
+    await new Promise(r => setTimeout(r, 3000));
   }
   let dev;
   try { dev = await navigator.usb.requestDevice({ filters: [FL.DFU_FILTER] }); }

@@ -611,6 +611,11 @@ static void cmd_erase(bool all)
 static void cmd_reboot(bool dfu)
 {
     if (refuse_if_armed()) return;
+    if (dfu && watchdog_running()) {
+        /* der Watchdog wuerde den Bootloader nach 100 ms zuruecksetzen */
+        say("ERR dfu: seit dem Einschalten schon gearmt - USB und Akku kurz trennen, dann nochmals");
+        return;
+    }
     say(dfu ? "OK dfu" : "OK reboot");
     vTaskDelay(pdMS_TO_TICKS(100));
     system_reboot(dfu);

@@ -31,5 +31,9 @@ static inline bool gpio_read(GPIO_TypeDef *port, uint32_t pin)
     return (port->IDR & (1u << pin)) != 0;
 }
 
+/* Der Watchdog laesst sich nach dem Start nur durch Ausschalten stoppen; er
+ * laeuft auch nach einem Software-Reset weiter. Deshalb startet er erst beim
+ * ersten Armen: am Boden bleibt der Sprung in den Bootloader (DFU) moeglich. */
 void watchdog_init(uint32_t timeout_ms);
 void watchdog_kick(void);
+bool watchdog_running(void);
