@@ -7,9 +7,12 @@ const { app, BrowserWindow, dialog, Menu, shell } = require('electron');
 const path = require('path');
 const fs = require('fs');
 
-const FC_VID = 0x1209, FC_PID = 0x0001;
+const FC_VID = 0x1209, FC_PID = 0x0001;            /* eigene Firmware */
+const BF_VID = 0x0483, BF_PID = 0x5740;            /* Betaflight (STM32 Virtual COM Port) */
+const DFU_VID = 0x0483, DFU_PID = 0xdf11;          /* STM32-Bootloader */
 const hex = v => (v === undefined || v === null) ? NaN : (typeof v === 'number' ? v : (/^0x/i.test(v) ? parseInt(v, 16) : parseInt(v, 10)));
 const isFc = p => hex(p.vendorId) === FC_VID && hex(p.productId) === FC_PID;
+const isBf = p => hex(p.vendorId) === BF_VID && hex(p.productId) === BF_PID;
 
 function uniquePath(dir, name) {
   let p = path.join(dir, name);
@@ -29,9 +32,10 @@ function createWindow() {
   /* USB-Geraete (Web Serial): eigene Firmware automatisch waehlen, sonst Liste anzeigen */
   ses.on('select-serial-port', (event, portList, webContents, callback) => {
     event.preventDefault();
-    const fc = portList.filter(isFc);
+    const fc = portList.filter(isFc), bf = portList.filter(isBf);
     if (fc.length === 1) { callback(fc[0].portId); return; }
-    const list = fc.length ? fc : portList;
+    if (!fc.length && bf.length === 1) { callback(bf[0].portId); return; }
+    const list = fc.length ? fc : bf.length ? bf : portList;
     if (!list.length) {
       dialog.showMessageBox(win, { type: 'info', message: 'Kein Flightcontroller gefunden',
         detail: 'USB-Kabel eingesteckt? Läuft die eigene Firmware (nicht Betaflight)?' });
@@ -41,8 +45,17 @@ function createWindow() {
     const r = dialog.showMessageBoxSync(win, { type: 'question', message: 'Gerät wählen', buttons: [...labels, 'Abbrechen'], cancelId: labels.length });
     callback(r < list.length ? list[r].portId : '');
   });
-  ses.setPermissionCheckHandler((wc, permission) => permission === 'serial');
-  ses.setDevicePermissionHandler(details => details.deviceType === 'serial');
+  /* WebUSB: Bootloader (DFU) zum Flashen automatisch waehlen */
+  ses.on('select-usb-device', (event, details, callback) => {
+    event.preventDefault();
+    const dfu = details.deviceList.filter(d => d.vendorId === DFU_VID && d.productId === DFU_PID);
+    if (dfu.length) { callback(dfu[0].deviceId); return; }
+    dialog.showMessageBox(win, { type: 'info', message: 'Kein Flightcontroller im Bootloader gefunden',
+      detail: 'Zuerst «Bootloader starten». Falls er nicht erscheint: Boot-Taste gedrückt halten und USB einstecken.' });
+    callback();
+  });
+  ses.setPermissionCheckHandler((wc, permission) => permission === 'serial' || permission === 'usb');
+  ses.setDevicePermissionHandler(details => details.deviceType === 'serial' || details.deviceType === 'usb');
 
   /* Downloads (CSV, Protokoll, diff) direkt in den Ordner Downloads */
   ses.on('will-download', (e, item) => {

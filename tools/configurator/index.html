@@ -168,6 +168,7 @@
     <a data-tab="config">Alle Einstellungen</a>
     <a data-tab="blackbox">Flugdaten</a>
     <a data-tab="cli">CLI</a>
+    <a data-tab="flash">Firmware flashen</a>
   </nav>
 
   <main id="main">
@@ -188,7 +189,7 @@
           <div class="panel"><h2>Vor dem Verbinden</h2>
             <div class="muted">Drohne per USB anschliessen. Für Motortests zusätzlich den Akku über den Smoke Stopper – <b>immer ohne Propeller</b>.</div></div>
           <div class="panel"><h2>Läuft noch Betaflight?</h2>
-            <div class="muted">Dann den Betaflight Configurator verwenden. Dieser Configurator spricht nur mit der eigenen Firmware (USB-ID 1209:0001).</div></div>
+            <div class="muted">Dann zuerst im Tab <b>Firmware flashen</b> Betaflight sichern und die eigene Firmware aufspielen. Verbinden geht nur mit der eigenen Firmware (USB-ID 1209:0001).</div></div>
         </div>
       </div>
     </section>
@@ -411,6 +412,39 @@
       </div>
     </section>
 
+
+    <!-- ======================= Firmware flashen ======================= -->
+    <section class="tab" id="tab-flash">
+      <h1>Firmware flashen</h1>
+      <p class="sub">Wie der Firmware Flasher im Betaflight Configurator. Der Bootloader des STM32 ist fest im Chip: auch wenn etwas schiefgeht, kann man immer neu flashen (notfalls Boot-Taste halten und USB einstecken).</p>
+      <div class="grid g2">
+        <div class="panel">
+          <h2>1 · Betaflight sichern (Build A)</h2>
+          <div class="muted" style="font-size:13px;margin-bottom:12px">Läuft auf der Drohne noch Betaflight: Einstellungen mit <span class="mono">diff all</span> sichern, bevor überschrieben wird. Die Datei landet in Downloads.</div>
+          <div class="row">
+            <button class="btn primary" id="btnBfBackup">Betaflight verbinden und sichern</button>
+            <button class="btn" id="btnBfBl" disabled>Bootloader starten</button>
+          </div>
+          <div class="kv" style="margin-top:12px" id="bfInfo"></div>
+          <pre id="bfOut" class="mono" style="display:none;max-height:180px;overflow:auto;background:var(--bg);border:1px solid var(--border);border-radius:4px;padding:8px;font-size:11.5px;margin:12px 0 0"></pre>
+        </div>
+        <div class="panel">
+          <h2>2 · Firmware schreiben</h2>
+          <div class="field"><label>Firmware<small id="fwSrcInfo">mitgeliefert</small></label>
+            <select id="fwSrc"><option value="bundled">diy_drone (mitgeliefert)</option><option value="file">Datei wählen …</option></select></div>
+          <input type="file" id="fwFile" accept=".hex" style="display:none">
+          <label class="row" style="gap:8px;margin:12px 0"><input type="checkbox" id="fwBackupOk">Betaflight-Einstellungen sind gesichert (oder es läuft schon die eigene Firmware)</label>
+          <div class="muted" style="font-size:12.5px;margin-bottom:12px">Ablauf: Drohne in den Bootloader bringen (links «Bootloader starten», bei eigener Firmware: Übersicht → Bootloader), dann «Flashen» → Gerät <span class="mono">STM32 BOOTLOADER</span> wählen.</div>
+          <div class="row"><button class="btn primary" id="btnFlash" disabled>Flashen</button><span class="sp"></span><span class="muted" id="flashState"></span></div>
+          <div style="margin-top:12px"><div class="progress"><div id="flashBar"></div></div><div class="muted mono" id="flashTxt" style="font-size:12px;margin-top:6px"></div></div>
+        </div>
+      </div>
+      <div class="panel" style="margin-top:16px">
+        <h2>Zurück zu Betaflight</h2>
+        <div class="muted" style="font-size:13px">Betaflight-Firmware für <span class="mono">GEPRCF722</span> im Betaflight Configurator herunterladen (oder dort direkt flashen), hier mit «Datei wählen» flashen. Danach die gesicherte Datei einspielen:</div>
+        <div class="row" style="margin-top:10px"><button class="btn" id="btnBfRestore">Gesicherte Einstellungen in Betaflight einspielen (.txt)</button><input type="file" id="bfRestoreFile" accept=".txt" style="display:none"></div>
+      </div>
+    </section>
     <div id="savebar">
       <b>Ungespeicherte Änderungen</b><span id="saveCount" class="muted"></span>
       <span class="sp"></span>
@@ -434,6 +468,8 @@
 
 <script src="protocol.js"></script>
 <script src="mock.js"></script>
+<script src="flasher.js"></script>
+<script src="firmware/firmware_hex.js"></script>
 <script>
 'use strict';
 /* =====================================================================
@@ -1639,8 +1675,8 @@ function updateConnUI() {
   $('btnConnect').classList.toggle('primary', !S.connected);
   $('btnDemo').style.display = S.connected ? 'none' : '';
   $('connInfo').textContent = S.connected ? (S.demo ? 'Demo' : (S.version?.board || '')) : '';
-  document.querySelectorAll('nav a').forEach(a => a.classList.toggle('disabled', !S.connected && a.dataset.tab !== 'cli'));
-  if (!S.connected && S.tab !== 'welcome') showTab('welcome');
+  document.querySelectorAll('nav a').forEach(a => a.classList.toggle('disabled', !S.connected && !['cli', 'flash'].includes(a.dataset.tab)));
+  if (!S.connected && !['welcome', 'flash'].includes(S.tab)) showTab('welcome');
   for (const b of ['btnGyroCal', 'btnAccCal', 'btnInfo', 'btnReboot', 'btnDfu', 'btnDump', 'btnErase', 'btnExport', 'btnImport', 'btnDefaults']) $(b).disabled = !S.connected;
   refreshParamInputs(); updateSaveBar(); renderChips(); renderFooter(); updateMotorEnable();
 }
@@ -1669,6 +1705,138 @@ function download(name, content) {
 }
 function dateStamp() { const d = new Date(); return `${d.getFullYear()}${String(d.getMonth() + 1).padStart(2, '0')}${String(d.getDate()).padStart(2, '0')}`; }
 function setStatus(s) { $('fStatus').textContent = s; }
+
+
+/* =====================================================================
+ * Firmware flashen (flasher.js)
+ * ===================================================================== */
+const FW = { bfPort: null, bfIo: null, backupDone: false, image: null, imageName: '' };
+function fwSetImage(text, name) {
+  try { FW.image = FL.parseHex(text); FW.imageName = name; $('fwSrcInfo').textContent = `${name} · ${(FW.image.bytes / 1024).toFixed(1)} KB`; }
+  catch (e) { FW.image = null; $('fwSrcInfo').textContent = 'Fehler: ' + e.message; }
+  fwUpdate();
+}
+function fwUpdate() {
+  $('btnFlash').disabled = !(FW.image && $('fwBackupOk').checked && 'usb' in navigator);
+  if (!('usb' in navigator)) $('flashState').textContent = 'WebUSB fehlt (Chrome/Edge oder Mac-App verwenden)';
+}
+async function serialIo(port) {
+  await port.open({ baudRate: 115200 });
+  try { await port.setSignals({ dataTerminalReady: true }); } catch (e) { /* egal */ }
+  const reader = port.readable.getReader(), writer = port.writable.getWriter();
+  let pending = '', waiting = null;
+  (async () => { try { for (;;) { const { value, done } = await reader.read(); if (done) break; pending += new TextDecoder().decode(value); if (waiting) { waiting(); waiting = null; } } } catch (e) { /* zu */ } })();
+  return {
+    write: t => writer.write(new TextEncoder().encode(t)),
+    read: ms => new Promise(res => {
+      if (pending) { const c = pending; pending = ''; res(c); return; }
+      const t = setTimeout(() => { waiting = null; res(''); }, ms);
+      waiting = () => { clearTimeout(t); const c = pending; pending = ''; res(c); };
+    }),
+    close: async () => { try { await reader.cancel(); } catch (e) { /**/ } try { reader.releaseLock(); writer.releaseLock(); } catch (e) { /**/ } try { await port.close(); } catch (e) { /**/ } },
+  };
+}
+function bfKv(rows) { const kv = $('bfInfo'); kv.innerHTML = ''; for (const [k, v, err] of rows) kv.append(el('div', { class: 'k' }, k), el('div', { style: err ? 'color:var(--danger)' : '' }, v)); }
+async function bfBackup() {
+  if (S.connected) await disconnect(true);
+  if (!('serial' in navigator)) { toast('Web Serial fehlt.', 'err'); return; }
+  let port;
+  try { port = await navigator.serial.requestPort({ filters: [FL.BF_FILTER] }); } catch (e) { toast('Kein Betaflight-Gerät gewählt (USB 0483:5740). Läuft Betaflight und ist das Kabel ein Datenkabel?', 'err'); return; }
+  $('btnBfBackup').disabled = true; bfKv([['Status', 'verbinde …']]);
+  try {
+    const io = await serialIo(port);
+    FW.bfPort = port; FW.bfIo = io;
+    await FL.bfEnterCli(io);
+    const vtxt = await FL.bfCollect(io, 'version', { idleMs: 800, maxMs: 5000 });
+    const ver = FL.parseBfVersion(vtxt) || {};
+    const diff = await FL.bfCollect(io, 'diff all', { idleMs: 1500, maxMs: 30000 });
+    if (!/\n(set|feature|serial|resource|board_name|# version)/.test(diff)) throw new Error('diff all unvollständig');
+    const name = `betaflight_diff_all_${(ver.board || 'FC')}_${dateStamp()}_${new Date().toTimeString().slice(0, 5).replace(':', '')}.txt`;
+    download(name, diff.replace(/^diff all\n/, ''));
+    FW.backupDone = true; $('fwBackupOk').checked = true; fwUpdate();
+    $('bfOut').style.display = 'block'; $('bfOut').textContent = diff.slice(0, 6000);
+    const okBoard = ver.board === 'GEPRCF722';   /* nur genau dieses Target: Pinbelegung der Firmware */
+    bfKv([['Firmware', `${ver.fw || '?'} ${ver.version || ''}`], ['Board', ver.board || '?', !okBoard], ['MCU', ver.mcu || '?'],
+      ['Gesichert', `${name} (${diff.split('\n').length} Zeilen) → Downloads`]]);
+    if (!okBoard) { toast(`Board «${ver.board || '?'}» statt GEPRCF722 – die eigene Firmware passt nicht, nicht flashen!`, 'err'); $('fwBackupOk').checked = false; fwUpdate(); }
+    $('btnBfBl').disabled = !okBoard;
+    toast('Betaflight-Einstellungen gesichert.', 'ok');
+  } catch (e) {
+    bfKv([['Fehler', e.message, true]]); toast('Sichern fehlgeschlagen: ' + e.message, 'err');
+    if (FW.bfIo) { await FW.bfIo.close(); FW.bfIo = null; }
+  }
+  $('btnBfBackup').disabled = false;
+}
+async function bfBootloader() {
+  if (!FW.bfIo) return;
+  try { await FW.bfIo.write('bl\r\n'); } catch (e) { /* trennt sich */ }
+  await new Promise(r => setTimeout(r, 300));
+  await FW.bfIo.close(); FW.bfIo = null; $('btnBfBl').disabled = true;
+  $('flashState').textContent = 'Bootloader gestartet – jetzt «Flashen»';
+  toast('Bootloader gestartet. Jetzt «Flashen» und STM32 BOOTLOADER wählen.', 'ok');
+}
+async function fwFlash() {
+  if (!FW.image) return;
+  if (S.connected) {
+    /* eigene Firmware: selbst in den Bootloader schicken */
+    try { await cmd('dfu', { timeout: 1500 }); } catch (e) { /* trennt sich */ }
+    await disconnect(true);
+    await new Promise(r => setTimeout(r, 2500));
+  }
+  let dev;
+  try { dev = await navigator.usb.requestDevice({ filters: [FL.DFU_FILTER] }); }
+  catch (e) { toast('Kein Gerät im Bootloader gefunden (USB 0483:df11). Zuerst «Bootloader starten».', 'err'); return; }
+  const dfu = new FL.Dfu(dev);
+  const bar = $('flashBar'), txt = $('flashTxt');
+  $('btnFlash').disabled = true; $('flashState').textContent = 'läuft – Kabel nicht abziehen!';
+  const t0 = performance.now();
+  try {
+    await dfu.open();
+    txt.textContent = `Bootloader: ${dfu.name || 'STM32'}`;
+    const r = await dfu.flash(FW.image, (phase, done, total) => {
+      const base = { 'Löschen': 0, 'Schreiben': 15, 'Prüfen': 70 }[phase], span = { 'Löschen': 15, 'Schreiben': 55, 'Prüfen': 30 }[phase];
+      bar.style.width = (base + span * done / Math.max(1, total)) + '%';
+      txt.textContent = `${phase}: ${phase === 'Löschen' ? `Sektor ${done}/${total}` : `${(done / 1024).toFixed(0)} / ${(total / 1024).toFixed(0)} KB`}`;
+    });
+    await dfu.leave(FW.image.blocks[0].address);
+    bar.style.width = '100%';
+    txt.textContent = `Fertig: ${(r.bytes / 1024).toFixed(1)} KB geschrieben und geprüft, ${r.sectors} Sektoren, ${((performance.now() - t0) / 1000).toFixed(1)} s. Firmware startet.`;
+    $('flashState').textContent = 'erfolgreich';
+    toast('Firmware geflasht und geprüft. Jetzt oben «Verbinden».', 'ok');
+  } catch (e) {
+    txt.textContent = 'Fehler: ' + e.message; $('flashState').textContent = 'fehlgeschlagen';
+    toast('Flashen fehlgeschlagen: ' + e.message + ' – nochmals versuchen (Bootloader bleibt erreichbar).', 'err');
+  }
+  try { await dfu.close(); } catch (e) { /**/ }
+  fwUpdate();
+}
+async function bfRestore(file) {
+  const lines = (await file.text()).split(/\r?\n/).filter(l => l.trim() && !l.startsWith('#'));
+  if (!await ask('In Betaflight einspielen?', `${lines.length} Zeilen aus «${file.name}» an Betaflight senden und mit <span class="mono">save</span> speichern.`, 'Einspielen')) return;
+  let port; try { port = await navigator.serial.requestPort({ filters: [FL.BF_FILTER] }); } catch (e) { return; }
+  const io = await serialIo(port);
+  try {
+    await FL.bfEnterCli(io);
+    let i = 0;
+    for (const l of lines) { await FL.bfCollect(io, l, { idleMs: 150, maxMs: 3000 }); if (++i % 10 === 0) $('bfInfo').textContent = `${i}/${lines.length}`; }
+    await io.write('save\r\n');
+    toast('Eingespielt und gespeichert, Betaflight startet neu.', 'ok');
+  } catch (e) { toast('Einspielen: ' + e.message, 'err'); }
+  await new Promise(r => setTimeout(r, 500)); await io.close();
+}
+function initFlashTab() {
+  $('btnBfBackup').onclick = bfBackup;
+  $('btnBfBl').onclick = bfBootloader;
+  $('btnFlash').onclick = fwFlash;
+  $('fwBackupOk').onchange = fwUpdate;
+  $('fwSrc').onchange = () => { if ($('fwSrc').value === 'file') $('fwFile').click(); else if (window.BUNDLED_FIRMWARE) fwSetImage(BUNDLED_FIRMWARE.hex, `${BUNDLED_FIRMWARE.name} (${BUNDLED_FIRMWARE.git})`); };
+  $('fwFile').onchange = async e => { const f = e.target.files[0]; if (f) fwSetImage(await f.text(), f.name); e.target.value = ''; };
+  $('btnBfRestore').onclick = () => $('bfRestoreFile').click();
+  $('bfRestoreFile').onchange = e => { if (e.target.files[0]) bfRestore(e.target.files[0]); e.target.value = ''; };
+  if (window.BUNDLED_FIRMWARE) fwSetImage(BUNDLED_FIRMWARE.hex, `${BUNDLED_FIRMWARE.name} (${BUNDLED_FIRMWARE.git})`);
+  else { $('fwSrc').value = 'file'; }
+  fwUpdate();
+}
 
 /* =====================================================================
  * Start
@@ -1724,7 +1892,7 @@ function init() {
   charts.spr = new Chart($('chSpR'), [[COL.text3, true], [COL.accent, false]], { minSpan: 20 });
   charts.acc = new Chart($('chAcc'), S3, { minSpan: 0.2 });
   charts.att = new Chart($('chAtt'), S3.slice(0, 2), { minSpan: 10 });
-  buildChBars(); buildSliders(); buildSteps();
+  buildChBars(); buildSliders(); buildSteps(); initFlashTab();
   showTab('welcome'); updateConnUI();
   termLine('Configurator bereit. Verbinden oben rechts.', 'sys');
   if (/[?&]demo\b/.test(location.search)) connectDemo();
