@@ -50,7 +50,7 @@ Textbefehle über den virtuellen COM-Port (`src/app/usb_cli.c`). Für den Config
 
 | Datei | Inhalt |
 |---|---|
-| `index.html` | Oberfläche |
+| `index.html` | Oberfläche (Gestaltung nach `DESIGN.md`) |
 | `protocol.js` | Zeilen/Live-Daten/Parameter lesen, Blackbox-Decoder (wie `buildb_log.py`) |
 | `mock.js` | Demo-Flightcontroller (gleiche Antworten wie die Firmware) |
 | `test/test_protocol.js` | prüft `protocol.js` und `mock.js` gegen Ausgaben der Firmware (`build-tests/`) |
