@@ -24,8 +24,14 @@
 #include "pt1.h"
 #include "util.h"
 
-/* Kanalbelegung (EdgeTX/ELRS Standard "AETR") */
+/* Kanalbelegung (EdgeTX/ELRS Standard "AETR"). Arm- und Angle-Schalter sind einstellbar
+ * (arm_ch/angle_ch, Standard Kanal 5 und 6), CH_ARM/CH_MODE sind nur die Standardwerte. */
 enum { CH_ROLL = 0, CH_PITCH = 1, CH_THROTTLE = 2, CH_YAW = 3, CH_ARM = 4, CH_MODE = 5 };
+
+/* CRSF-Rohwert -> us wie Betaflight (172 -> 988, 992 -> 1500, 1811 -> 2012) */
+float crsf_to_us(uint16_t v);
+/* Schalter aktiv: Kanal ch (1..16) liegt im Bereich [min_us, max_us]; ch = 0 -> nie */
+bool  flight_switch_active(const uint16_t ch[CRSF_NUM_CHANNELS], float ch_no, float min_us, float max_us);
 
 typedef struct {
     float loop_hz;                 /* Regelfrequenz */
@@ -84,6 +90,10 @@ typedef struct {
     float vbat_scale;              /* Betaflight vbat_scale (110) */
     float vbat_warn_cell;          /* Warnung [V pro Zelle] */
     float rx_uart;                 /* 0 = automatisch suchen, sonst UART 1, 2, 3, 4 oder 6 */
+
+    /* Schalter wie Betaflight "aux": Kanal (1..16, 0 = aus) und Bereich in us */
+    float arm_ch, arm_min_us, arm_max_us;
+    float angle_ch, angle_min_us, angle_max_us;
     float crsf_telemetry;          /* 1 = Akkuspannung an die Fernsteuerung senden */
 } flight_config_t;
 

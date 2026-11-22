@@ -703,6 +703,53 @@ static void test_arm_block_and_outputs(void)
     CHECK(params_set(&a, "gyro_lpf1_hz", "87.5"));
 }
 
+/* ---------- Schalter wie Betaflight aux (Kanal + Bereich) ---------- */
+
+static void test_switches(void)
+{
+    printf("Arm- und Angle-Schalter (Kanal, Bereich)\n");
+    CHECK_NEAR(crsf_to_us(172), 987.5, 0.01);
+    CHECK_NEAR(crsf_to_us(992), 1500.0, 0.01);
+    CHECK_NEAR(crsf_to_us(1811), 2011.875, 0.001);
+    uint16_t ch[CRSF_NUM_CHANNELS];
+    for (int i = 0; i < 16; i++) ch[i] = 992;
+    ch[6] = 172;                                     /* Kanal 7 unten */
+    CHECK(flight_switch_active(ch, 7, 900, 1125));
+    CHECK(!flight_switch_active(ch, 7, 1700, 2100));
+    CHECK(!flight_switch_active(ch, 0, 900, 2100)); /* aus */
+    CHECK(!flight_switch_active(ch, 17, 900, 2100));
+
+    /* Rubens Betaflight-Einstellung: Arm Kanal 5 1700-2100, Angle Kanal 7 unten (900-1125) */
+    flight_config_t cfg;
+    flight_default_config(&cfg);
+    CHECK(params_set(&cfg, "angle_ch", "7"));
+    CHECK(params_set(&cfg, "angle_min_us", "900"));
+    CHECK(params_set(&cfg, "angle_max_us", "1125"));
+    CHECK(!params_set(&cfg, "angle_ch", "6.5"));
+    flight_t f;
+    flight_init(&f, &cfg);
+    flight_input_t in;
+    memset(&in, 0, sizeof(in));
+    in.acc_g[2] = 1.0f;
+    in.rc_valid = true;
+    set_sticks(&in, CRSF_CHANNEL_MIN, CRSF_CHANNEL_MIN);
+    in.channels[6] = 1811;                           /* Kanal 7 oben -> Rate */
+    run(&f, &in, 1100);
+    CHECK(f.mode == MODE_RATE);
+    in.channels[6] = 172;                            /* unten -> Angle */
+    run(&f, &in, 2);
+    CHECK(f.mode == MODE_ANGLE);
+    /* Arm bei 1600 us: unter 1700 -> nicht armen */
+    in.channels[CH_ARM] = 1440;                      /* 1405 us */
+    run(&f, &in, 3);
+    in.channels[CH_ARM] = 1306;                      /* ca. 1696 us */
+    run(&f, &in, 3);
+    CHECK(!f.armed);
+    in.channels[CH_ARM] = 1811;
+    run(&f, &in, 3);
+    CHECK(f.armed);
+}
+
 /* ---------- CRSF-Telemetrie und Live-Daten fuer den Configurator ---------- */
 
 static char sample_dir[512];   /* Ordner fuer Beispieldateien (wie sample_log.bin), leer = keine */
@@ -1028,6 +1075,7 @@ int main(int argc, char **argv)
     test_flight();
     test_flight_features();
     test_arm_block_and_outputs();
+    test_switches();
     test_telemetry();
     test_params();
     test_logrec(argc > 1 ? argv[1] : NULL);

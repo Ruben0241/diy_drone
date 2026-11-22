@@ -75,6 +75,23 @@ void flight_default_config(flight_config_t *c)
     c->vbat_warn_cell = 3.5f;
     c->rx_uart = 0.0f;              /* automatisch: der erste UART mit gueltigen CRSF-Paketen */
     c->crsf_telemetry = 1.0f;
+
+    /* Schalter: oben (>= 1700 us) wie ueblich in Betaflight */
+    c->arm_ch = 5.0f;   c->arm_min_us = 1700.0f;   c->arm_max_us = 2100.0f;
+    c->angle_ch = 6.0f; c->angle_min_us = 1700.0f; c->angle_max_us = 2100.0f;
+}
+
+float crsf_to_us(uint16_t v)
+{
+    return ((float)v - 992.0f) * 0.625f + 1500.0f;
+}
+
+bool flight_switch_active(const uint16_t ch[CRSF_NUM_CHANNELS], float ch_no, float min_us, float max_us)
+{
+    const int n = (int)ch_no;
+    if (n < 1 || n > (int)CRSF_NUM_CHANNELS) return false;
+    const float us = crsf_to_us(ch[n - 1]);
+    return us >= min_us && us <= max_us;
 }
 
 bool flight_motor_map_valid(const flight_config_t *c)
@@ -232,7 +249,8 @@ static void disarm(flight_t *f)
 
 static void update_arming(flight_t *f, const flight_input_t *in, float throttle)
 {
-    const bool arm_switch = in->rc_valid && crsf_to_unipolar(in->channels[CH_ARM]) > 0.5f;
+    const bool arm_switch = in->rc_valid &&
+        flight_switch_active(in->channels, f->cfg.arm_ch, f->cfg.arm_min_us, f->cfg.arm_max_us);
     const bool level = fabsf(f->attitude_deg[0]) < f->cfg.arm_angle_max_deg &&
                        fabsf(f->attitude_deg[1]) < f->cfg.arm_angle_max_deg;
 
@@ -365,7 +383,8 @@ void flight_step(flight_t *f, const flight_input_t *in)
     }
     const float throttle = in->rc_valid ? crsf_to_unipolar(in->channels[CH_THROTTLE]) : 0.0f;
     f->throttle = throttle;
-    f->mode = (in->rc_valid && crsf_to_unipolar(in->channels[CH_MODE]) > 0.5f) ? MODE_ANGLE : MODE_RATE;
+    f->mode = (in->rc_valid && flight_switch_active(in->channels, c->angle_ch, c->angle_min_us, c->angle_max_us))
+              ? MODE_ANGLE : MODE_RATE;
 
     /* 4. Arming / Failsafe */
     update_arming(f, in, throttle);

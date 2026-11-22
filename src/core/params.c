@@ -85,6 +85,12 @@ static const param_def_t defs[] = {
     { "vbat_warn_cell", F(vbat_warn_cell), 3.0f, 4.0f, 2, false },
     { "rx_uart", F(rx_uart), 0, 6, 0, false },
     { "crsf_telemetry", F(crsf_telemetry), 0, 1, 0, false },
+    { "arm_ch",       F(arm_ch), 1, 16, 0, false },
+    { "arm_min_us",   F(arm_min_us), 900, 2100, 0, false },
+    { "arm_max_us",   F(arm_max_us), 900, 2100, 0, false },
+    { "angle_ch",     F(angle_ch), 0, 16, 0, false },
+    { "angle_min_us", F(angle_min_us), 900, 2100, 0, false },
+    { "angle_max_us", F(angle_max_us), 900, 2100, 0, false },
 };
 
 #define N_DEFS ((int)(sizeof(defs) / sizeof(defs[0])))
@@ -145,7 +151,8 @@ bool params_set(flight_config_t *cfg, const char *name, const char *value)
     }
     /* Zuordnungen: nur ganze Zahlen; auf dem GEPRC F722 ist UART 5 nicht herausgefuehrt */
     const bool is_map = strncmp(name, "motor", 5) == 0 && strstr(name, "_out") != NULL;
-    if ((is_map || strcmp(name, "rx_uart") == 0) && v != (float)(int)v) return false;
+    const bool is_ch = strcmp(name, "arm_ch") == 0 || strcmp(name, "angle_ch") == 0;
+    if ((is_map || is_ch || strcmp(name, "rx_uart") == 0) && v != (float)(int)v) return false;
     if (strcmp(name, "rx_uart") == 0 && v == 5.0f) return false;
     *field(cfg, i) = v;
     return true;

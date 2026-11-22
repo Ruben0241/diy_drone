@@ -240,7 +240,7 @@
     <!-- ======================= Empfänger ======================= -->
     <section class="tab" id="tab-receiver">
       <h1>Empfänger</h1>
-      <p class="sub">ELRS über CRSF. Kanäle in µs wie in Betaflight (988 … 2012). Belegung AETR: 1 Roll, 2 Pitch, 3 Gas, 4 Yaw, 5 Arm, 6 Angle-Mode.</p>
+      <p class="sub">ELRS über CRSF. Kanäle in µs wie in Betaflight (988 … 2012). Belegung AETR: 1 Roll, 2 Pitch, 3 Gas, 4 Yaw; Arm- und Angle-Schalter unten einstellbar.</p>
       <div class="grid g2">
         <div class="panel"><h2>Kanäle</h2><div id="chBars"></div></div>
         <div class="grid" style="gap:14px;align-content:start">
@@ -257,7 +257,13 @@
             <div class="field"><label>Empfänger-UART<small>Automatisch: die Firmware sucht UART 1, 2, 3, 4 und 6 ab</small></label><div id="f_rx_uart"></div></div>
             <div class="field"><label>Telemetrie an die Fernsteuerung<small>Akkuspannung (RxBt, Bat%) und Flugmodus auf der RadioMaster</small></label><div id="f_crsf_telemetry"></div></div>
             <div class="field"><label>Stick-Totband<small>Bereich um die Mitte ohne Wirkung (0 … 1)</small></label><div id="f_deadband"></div></div>
-            <div class="muted" style="font-size:12px;margin-top:6px">UART-Änderung wirkt nach Speichern + Neustart.</div>
+          </div>
+          <div class="panel"><h2>Schalter (wie Betaflight «Modes»)</h2>
+            <div class="field"><label>Arm: Kanal<small>aktiv im Bereich unten</small></label><div id="f_arm_ch"></div></div>
+            <div class="field" style="grid-template-columns:1fr 200px"><label>Arm: von … bis µs</label><div class="row" style="flex-wrap:nowrap" id="f_arm_rng"></div></div>
+            <div class="field"><label>Angle-Mode: Kanal<small>0 = immer Acro</small></label><div id="f_angle_ch"></div></div>
+            <div class="field" style="grid-template-columns:1fr 200px"><label>Angle-Mode: von … bis µs</label><div class="row" style="flex-wrap:nowrap" id="f_angle_rng"></div></div>
+            <div class="muted" style="font-size:12px;margin-top:6px">Werte wie in Betaflight unter «Modes» (µs). UART-Änderungen wirken erst nach Speichern + Neustart.</div>
           </div>
         </div>
       </div>
@@ -536,6 +542,8 @@ const PINFO = {
   motor3_out: 'Ausgang für M3 (hinten links)', motor4_out: 'Ausgang für M4 (vorne links)',
   vbat_scale: 'Spannungsteiler Akku (Betaflight vbat_scale)', vbat_warn_cell: 'Akkuwarnung [V pro Zelle]',
   rx_uart: 'Empfänger-UART (0 = automatisch)', crsf_telemetry: 'Telemetrie an die Fernsteuerung',
+  arm_ch: 'Arm-Schalter: Kanal', arm_min_us: 'Arm-Schalter: ab [µs]', arm_max_us: 'Arm-Schalter: bis [µs]',
+  angle_ch: 'Angle-Mode-Schalter: Kanal (0 = aus)', angle_min_us: 'Angle-Mode: ab [µs]', angle_max_us: 'Angle-Mode: bis [µs]',
 };
 const SELECTS = {
   filter: [[0, 'aus'], [1, 'PT1'], [2, 'Biquad']],
@@ -842,7 +850,8 @@ function buildParamUIs() {
   fd.append(fieldRow('dterm_lpf1_type'), fieldRow('dterm_lpf1_hz'), fieldRow('dterm_lpf2_type'), fieldRow('dterm_lpf2_hz'),
     fieldRow('yaw_lowpass_hz'), fieldRow('ff_smoothing_hz'), fieldRow('imu_kp'));
   /* Empfaenger */
-  for (const n of ['rx_uart', 'crsf_telemetry', 'deadband']) { const h = $('f_' + n); h.innerHTML = ''; h.append(paramInput(n)); }
+  for (const n of ['rx_uart', 'crsf_telemetry', 'deadband', 'arm_ch', 'angle_ch']) { const h = $('f_' + n); h.innerHTML = ''; h.append(paramInput(n)); }
+  for (const k of ['arm', 'angle']) { const h = $(`f_${k}_rng`); h.innerHTML = ''; h.append(paramInput(`${k}_min_us`), paramInput(`${k}_max_us`)); }
   buildParamTable();
   buildSliders();
   drawRates(); drawFilter();
@@ -1135,11 +1144,13 @@ function draw3d(cv, roll, pitch, yaw) {
 const CH_NAMES = ['1 Roll', '2 Pitch', '3 Gas', '4 Yaw', '5 Arm', '6 Angle', '7 AUX 3', '8 AUX 4'];
 function buildChBars() {
   const box = $('chBars'); box.innerHTML = '';
-  CH_NAMES.forEach((n, i) => box.append(el('div', { class: 'chrow' }, el('div', {}, n),
+  CH_NAMES.forEach((n, i) => box.append(el('div', { class: 'chrow' }, el('div', { id: 'chn' + i }, n),
     el('div', { class: 'bar' }, el('div', { class: 'fill', id: 'chf' + i }), el('div', { class: 'mid' }), el('div', { class: 'val mono', id: 'chv' + i }, '–')))));
 }
 function renderReceiver(t) {
   t.ch.forEach((v, i) => {
+    const nm = $('chn' + i);
+    if (nm) nm.textContent = `${i + 1} ${['Roll', 'Pitch', 'Gas', 'Yaw'][i] || (i + 1 === pval('arm_ch') ? 'Arm' : i + 1 === pval('angle_ch') ? 'Angle' : 'AUX ' + (i - 3))}`;
     const us = FC.crsfToUs(v);
     $('chf' + i).style.width = Math.max(0, Math.min(100, (us - 988) / (2012 - 988) * 100)) + '%';
     $('chv' + i).textContent = t.failsafe ? '–' : us;
@@ -1151,7 +1162,7 @@ function renderReceiver(t) {
   add('UART', t.rx_uart ? `UART ${t.rx_uart}` + (pval('rx_uart') ? ' (fest)' : ' (automatisch gefunden)') : 'noch keiner gefunden (sucht 1, 2, 3, 4, 6)');
   add('Link-Qualität', t.lq + ' %');
   add('Pakete', `${t.rx_frames} gültig, ${t.rx_crc_err} CRC-Fehler`);
-  add('Modus', (t.angle_mode ? 'Angle' : 'Rate/Acro') + ' (Kanal 6)');
+  add('Modus', (t.angle_mode ? 'Angle' : 'Rate/Acro') + ` (Kanal ${pval('angle_ch') || '–'})`);
   drawSticks($('cvSticks'), t);
 }
 function drawSticks(cv, t) {
@@ -1448,7 +1459,7 @@ const STEPS = [
   { id: 'stick_roll', title: 'Roll-Stick nach rechts', desc: 'Fernsteuerung an. Soll-Drehrate Roll muss positiv werden.', key: 'sp_r', expect: 1, param: 'stick_sign_roll', thr: 150, unit: '°/s', needRx: true },
   { id: 'stick_pitch', title: 'Pitch-Stick nach vorne', desc: 'Soll-Drehrate Pitch muss positiv werden (Nase runter).', key: 'sp_p', expect: 1, param: 'stick_sign_pitch', thr: 150, unit: '°/s', needRx: true },
   { id: 'stick_yaw', title: 'Yaw-Stick nach rechts', desc: 'Soll-Drehrate Yaw muss negativ werden (im Uhrzeigersinn).', key: 'sp_y', expect: -1, param: 'stick_sign_yaw', thr: 150, unit: '°/s', needRx: true },
-  { id: 'arm_switch', title: 'Arm-Schalter (Kanal 5) einmal ein und aus', desc: 'Nur Erkennung, armt ohne Akku/Motoren ungefährlich. Erwartet: Kanal 5 > 1700 µs und zurück.', special: 'arm', needRx: true },
+  { id: 'arm_switch', title: 'Arm-Schalter einmal ein und aus', desc: 'Nur Erkennung, armt ohne Akku/Motoren ungefährlich. Erwartet: Arm-Kanal im eingestellten Bereich und zurück.', special: 'arm', needRx: true },
   { id: 'failsafe', title: 'Failsafe: Fernsteuerung ausschalten', desc: 'Die Firmware muss «Failsafe» melden (innerhalb 0.25 s). Danach wieder einschalten.', special: 'fs' },
   { id: 'acc', title: 'ACC kalibrieren', desc: 'Drohne waagrecht hinstellen (Wasserwaage), dann Knopf drücken.', special: 'acc' },
 ];
@@ -1477,9 +1488,12 @@ function groundTestFeed(t) {
     }
   } else if (s.special === 'arm') {
     if (t.failsafe) return;
-    const us = FC.crsfToUs(t.ch[4]);
-    if (us > 1700) GT.seen.armOn = true;
-    if (GT.seen.armOn && us < 1300) { GT.res[s.id] = { ok: true, value: 'erkannt' }; nextStep(); }
+    const n = pval('arm_ch') || 5, lo = pval('arm_min_us') || 1700, hi = pval('arm_max_us') || 2100;
+    const all = [...t.ch];
+    const us = n <= all.length ? FC.crsfToUs(all[n - 1]) : 0;
+    const on = us >= lo && us <= hi;
+    if (on) GT.seen.armOn = true;
+    if (GT.seen.armOn && !on) { GT.res[s.id] = { ok: true, value: 'erkannt' }; nextStep(); }
   } else if (s.special === 'fs') {
     if (t.failsafe) GT.seen.fs = true;
     if (GT.seen.fs && !t.failsafe) { GT.res[s.id] = { ok: true, value: 'Failsafe erkannt, Verbindung zurück' }; nextStep(); }
