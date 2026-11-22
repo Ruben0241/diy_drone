@@ -7,7 +7,7 @@
  *   Gyro ICM-42688-P   SPI3 (SCK PC10, MISO PC11, MOSI PC12), CS PA15, INT PC3
  *                      Ausrichtung CW180 (x und y umgekehrt)
  *   Gyro 2 (optional)  SPI3, CS PD2  -> wird immer abgewaehlt (high)
- *   Empfaenger (CRSF)  UART2: TX PA2, RX PA3  [pruefen: an welchem UART haengt der RP3?]
+ *   Empfaenger (CRSF)  UART 1/2/3/4/6, automatisch gesucht (rx_uart.c), Einstellung rx_uart
  *   Motoren (DShot)    M1 PB4 TIM3_CH1, M2 PB5 TIM3_CH2, M3 PB0 TIM3_CH3, M4 PB1 TIM3_CH4
  *                      DMA-Burst ueber TIM3_UP: DMA1 Stream 2, Kanal 5
  *   Blackbox-Flash     W25Q128 an SPI2 (SCK PB13, MISO PB14, MOSI PB15), CS PB12
@@ -36,10 +36,6 @@
 #define GYRO_INT_PORT   GPIOC
 #define GYRO_INT_PIN    3
 
-/* Empfaenger */
-#define RX_USART        USART2
-#define RX_USART_IRQn   USART2_IRQn
-
 /* Abzuwaehlende Chips auf anderen SPI-Bussen */
 #define FLASH_CS_PORT   GPIOB
 #define FLASH_CS_PIN    12
@@ -56,7 +52,6 @@
 #define BEEPER_PIN      13
 #define BEEPER_ACTIVE_HIGH 1     /* Betaflight: BEEPER_INVERTED */
 
-/* Akkuspannung: U = ADC / 4095 * 3.3 V * VBAT_SCALE / 10
- * VBAT_SCALE wie Betaflight "vbat_scale" [pruefen: Wert aus diff all uebernehmen] */
+/* Akkuspannung: U = ADC / 4095 * 3.3 V * vbat_scale / 10
+ * vbat_scale ist eine Einstellung (Standard 110 wie Betaflight), per USB/Configurator abgleichen */
 #define VBAT_ADC_CHANNEL 10
-#define VBAT_SCALE       110.0f

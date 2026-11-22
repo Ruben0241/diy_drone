@@ -76,6 +76,15 @@ static const param_def_t defs[] = {
     { "acc_bias_x", F(acc_bias[0]), -0.5f, 0.5f, 4, false },
     { "acc_bias_y", F(acc_bias[1]), -0.5f, 0.5f, 4, false },
     { "acc_bias_z", F(acc_bias[2]), -0.5f, 0.5f, 4, false },
+
+    { "motor1_out", F(motor_out[0]), 1, 4, 0, false },
+    { "motor2_out", F(motor_out[1]), 1, 4, 0, false },
+    { "motor3_out", F(motor_out[2]), 1, 4, 0, false },
+    { "motor4_out", F(motor_out[3]), 1, 4, 0, false },
+    { "vbat_scale", F(vbat_scale), 10, 255, 0, false },
+    { "vbat_warn_cell", F(vbat_warn_cell), 3.0f, 4.0f, 2, false },
+    { "rx_uart", F(rx_uart), 0, 6, 0, false },
+    { "crsf_telemetry", F(crsf_telemetry), 0, 1, 0, false },
 };
 
 #define N_DEFS ((int)(sizeof(defs) / sizeof(defs[0])))
@@ -134,6 +143,10 @@ bool params_set(flight_config_t *cfg, const char *name, const char *value)
     if (strncmp(name, "gyro_sign", 9) == 0 || strncmp(name, "stick_sign", 10) == 0) {
         if (v != 1.0f && v != -1.0f) return false;
     }
+    /* Zuordnungen: nur ganze Zahlen; auf dem GEPRC F722 ist UART 5 nicht herausgefuehrt */
+    const bool is_map = strncmp(name, "motor", 5) == 0 && strstr(name, "_out") != NULL;
+    if ((is_map || strcmp(name, "rx_uart") == 0) && v != (float)(int)v) return false;
+    if (strcmp(name, "rx_uart") == 0 && v == 5.0f) return false;
     *field(cfg, i) = v;
     return true;
 }
@@ -179,6 +192,27 @@ int params_format(const flight_config_t *cfg, int i, char *buf, int cap)
     int pos = put_str(buf, 0, cap, defs[i].name);
     pos = put_str(buf, pos, cap, " = ");
     return put_fixed(buf, pos, cap, params_get(cfg, i), defs[i].decimals);
+}
+
+int params_format_machine(const flight_config_t *cfg, const flight_config_t *def, int i,
+                          char *buf, int cap)
+{
+    if (cap < 2 || i < 0 || i >= N_DEFS) return 0;
+    const param_def_t *d = &defs[i];
+    const int dec = d->decimals;
+    int pos = put_str(buf, 0, cap, "$P,");
+    pos = put_str(buf, pos, cap, d->name);
+    pos = put_str(buf, pos, cap, ",");
+    pos = put_fixed(buf, pos, cap, params_get(cfg, i), dec);
+    pos = put_str(buf, pos, cap, ",");
+    pos = put_fixed(buf, pos, cap, d->min, dec > 2 ? dec : 2);
+    pos = put_str(buf, pos, cap, ",");
+    pos = put_fixed(buf, pos, cap, d->max, dec > 2 ? dec : 2);
+    pos = put_str(buf, pos, cap, ",");
+    pos = put_uint(buf, pos, cap, dec);
+    pos = put_str(buf, pos, cap, ",");
+    pos = put_fixed(buf, pos, cap, params_get(def, i), dec);
+    return pos;
 }
 
 int params_serialize(const flight_config_t *cfg, char *buf, int cap)

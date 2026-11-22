@@ -33,6 +33,7 @@
 #include "crsf.h"
 #include "flight.h"
 #include "logrec.h"
+#include "telemetry.h"
 
 /* ---------- Einstellungen ---------- */
 
@@ -43,7 +44,8 @@
 #define RC_TIMEOUT_MS       250u     /* laenger keine Pakete -> Failsafe */
 #define GYRO_TIMEOUT_MS     5u       /* kein Data-Ready -> Motoren aus */
 #define WATCHDOG_MS         100u
-#define VBAT_WARN_PER_CELL  3.5f
+#define RX_LOCK_FRAMES      5u       /* so viele gueltige CRSF-Pakete, bis ein UART gilt */
+#define TELEMETRY_MS        100u     /* abwechselnd Akku und Flugmodus -> je 5 Hz */
 
 /* ---------- gemeinsame Daten (app_shared.h) ---------- */
 
@@ -64,6 +66,10 @@ volatile bool      g_cfg_from_flash;
 volatile float     g_motor_test_value[4];
 volatile uint32_t  g_motor_test_until_ms;
 volatile bool      g_acc_cal_request;
+volatile bool      g_gyro_cal_request;
+volatile uint8_t   g_rx_uart;
+volatile uint16_t  g_motor_out[4];
+volatile uint8_t   g_battery_cells;
 volatile uint32_t  g_loop_us_max, g_loop_us_avg_x10;
 volatile uint32_t  g_cycle_us_min = 0xFFFFFFFFu, g_cycle_us_max;
 
@@ -125,7 +131,10 @@ static void control_task(void *arg)
             /* Gyro meldet sich nicht: Motoren aus, nicht weiterregeln */
             g_gyro_ok = false;
             flight_force_disarm(&g_flight);
-            dshot_write(g_flight.dshot);
+            g_flight.arm_block |= ARM_BLOCK_GYRO_FAIL;
+            static const uint16_t zero[4] = { 0, 0, 0, 0 };
+            dshot_write(zero);
+            for (int m = 0; m < 4; m++) g_motor_out[m] = 0;
             if (g_flight.event_disarmed) beep_request = true;
             continue;
         }
@@ -147,6 +156,10 @@ static void control_task(void *arg)
             g_acc_cal_request = false;
             flight_start_acc_calibration(&g_flight);
         }
+        if (g_gyro_cal_request && !g_flight.armed) {
+            g_gyro_cal_request = false;
+            flight_start_gyro_calibration(&g_flight);
+        }
         const uint32_t now_ms = xTaskGetTickCount();
         in.motor_test = !g_flight.armed && (int32_t)(g_motor_test_until_ms - now_ms) > 0;
         for (int m = 0; m < 4; m++) in.motor_test_value[m] = g_motor_test_value[m];
@@ -163,9 +176,13 @@ static void control_task(void *arg)
         in.arm_inhibit = g_cli_busy;
 
         flight_step(&g_flight, &in);
-        if (!dshot_write(g_flight.dshot)) {
+        /* M1..M4 auf die Ausgaenge verteilen (motorN_out, wie Betaflight "resource MOTOR") */
+        uint16_t out[4];
+        flight_map_outputs(&g_flight, out);
+        if (!dshot_write(out)) {
             g_loop_overruns++;
         }
+        for (int m = 0; m < 4; m++) g_motor_out[m] = out[m];
 
         if (g_flight.event_armed || g_flight.event_disarmed || g_flight.event_failsafe) {
             beep_request = true;
@@ -212,32 +229,79 @@ static void control_task(void *arg)
 
 /* ---------- Empfaenger-Task ---------- */
 
+static void send_telemetry(bool battery)
+{
+    uint8_t fr[CRSF_TELEMETRY_MAX];
+    uint32_t n;
+    if (battery) {
+        const float v = g_vbat_volts;
+        const int cells = g_battery_cells ? g_battery_cells : tlm_battery_cells(v);
+        n = crsf_build_battery(fr, v, 0.0f, 0, (uint8_t)tlm_battery_percent_cells(v, cells));
+    } else {
+        /* wie Betaflight: "*" = nicht gearmt, "!FS!" = Failsafe */
+        const bool angle = g_flight.mode == MODE_ANGLE;
+        const char *m = g_flight.failsafe ? "!FS!"
+                      : g_flight.armed ? (angle ? "ANGL" : "ACRO")
+                      : (angle ? "ANGL*" : "ACRO*");
+        n = crsf_build_flight_mode(fr, m);
+    }
+    rx_uart_write(fr, n);
+}
+
 static void rx_task(void *arg)
 {
     (void)arg;
-    crsf_parser_t parser;
-    crsf_parser_init(&parser);
+    /* Ein Parser pro UART. Bei rx_uart = 0 laufen alle, bis einer gueltige Pakete liefert. */
+    static crsf_parser_t parser[RX_UART_PORTS];
+    uint32_t hits[RX_UART_PORTS] = { 0 };
+    int locked = -1;
+    for (int i = 0; i < RX_UART_PORTS; i++) {
+        crsf_parser_init(&parser[i]);
+        if ((int)boot_cfg.rx_uart != 0 && rx_uart_active(i)) locked = i;   /* fest eingestellt */
+    }
+    if (locked >= 0) g_rx_uart = (uint8_t)rx_uart_number(locked);
+
     uint16_t ch[CRSF_NUM_CHANNELS];
     crsf_link_stats_t stats;
-    TickType_t wake = xTaskGetTickCount();
+    TickType_t wake = xTaskGetTickCount(), last_tlm = wake;
+    bool tlm_battery = true;
 
     for (;;) {
-        uint8_t b;
-        while (rx_uart_read(&b)) {
-            const crsf_result_t r = crsf_parser_feed(&parser, b, ch, &stats);
-            if (r == CRSF_RC_CHANNELS) {
-                taskENTER_CRITICAL();
-                memcpy(rc_shared.channels, ch, sizeof(ch));
-                rc_shared.last_frame_tick = xTaskGetTickCount();
-                rc_shared.ever_received = true;
-                taskEXIT_CRITICAL();
-                for (unsigned i = 0; i < CRSF_NUM_CHANNELS; i++) g_rc_channels[i] = ch[i];
-            } else if (r == CRSF_LINK_STATS) {
-                g_link_quality = stats.uplink_link_quality;
+        for (int i = 0; i < RX_UART_PORTS; i++) {
+            if (locked >= 0 && i != locked) continue;
+            uint8_t b;
+            while (rx_uart_read(i, &b)) {
+                const crsf_result_t r = crsf_parser_feed(&parser[i], b, ch, &stats);
+                if (locked < 0) {
+                    if (r == CRSF_RC_CHANNELS && ++hits[i] >= RX_LOCK_FRAMES) {
+                        locked = i;
+                        rx_uart_lock(i);
+                        g_rx_uart = (uint8_t)rx_uart_number(i);
+                    }
+                    continue;
+                }
+                if (r == CRSF_RC_CHANNELS) {
+                    taskENTER_CRITICAL();
+                    memcpy(rc_shared.channels, ch, sizeof(ch));
+                    rc_shared.last_frame_tick = xTaskGetTickCount();
+                    rc_shared.ever_received = true;
+                    taskEXIT_CRITICAL();
+                    for (unsigned k = 0; k < CRSF_NUM_CHANNELS; k++) g_rc_channels[k] = ch[k];
+                } else if (r == CRSF_LINK_STATS) {
+                    g_link_quality = stats.uplink_link_quality;
+                }
             }
         }
-        g_rc_frames = parser.frames_ok;
-        g_rc_crc_errors = parser.crc_errors;
+        if (locked >= 0) {
+            g_rc_frames = parser[locked].frames_ok;
+            g_rc_crc_errors = parser[locked].crc_errors;
+            const TickType_t now = xTaskGetTickCount();
+            if (g_flight.cfg.crsf_telemetry >= 0.5f && now - last_tlm >= pdMS_TO_TICKS(TELEMETRY_MS)) {
+                last_tlm = now;
+                send_telemetry(tlm_battery);
+                tlm_battery = !tlm_battery;
+            }
+        }
         vTaskDelayUntil(&wake, 1);
     }
 }
@@ -330,11 +394,11 @@ static void status_task(void *arg)
     if (!system_clock_is_hse()) beeps(2);    /* Quarz nicht angelaufen */
     if (!g_blackbox.ok) beeps(4);            /* kein Flash gefunden */
 
-    uint32_t tick = 0;
+    uint32_t tick = 0, cells_ticks = 0;
     bool full_warned = false;
     for (;;) {
         tick++;
-        g_vbat_volts = vbat_read_volts();
+        g_vbat_volts = vbat_read_volts(g_flight.cfg.vbat_scale);
 
         /* LED 0: blinkt langsam = bereit, schnell = nicht kalibriert / kein Empfaenger,
          * dauernd an = armed */
@@ -361,10 +425,13 @@ static void status_task(void *arg)
         }
         if (!g_flight.armed) full_warned = false;
 
-        /* Akkuwarnung (Zellenzahl grob aus der Spannung geschaetzt) */
+        /* Akkuwarnung. Zellenzahl einmal nach dem Einstecken bestimmen (1 s Ruhespannung),
+         * nicht laufend: sonst haelt man einen fast leeren 4S unter Last fuer einen vollen 3S. */
         const float v = g_vbat_volts;
-        const int cells = (v > 4.4f * 5) ? 6 : (v > 4.4f * 4) ? 5 : (v > 4.4f * 3) ? 4 : 3;
-        if (v > 5.0f && v < VBAT_WARN_PER_CELL * (float)cells && (tick % 20) == 0) {
+        if (v < 5.0f) { cells_ticks = 0; g_battery_cells = 0; }
+        else if (g_battery_cells == 0 && ++cells_ticks >= 10) g_battery_cells = (uint8_t)tlm_battery_cells(v);
+        const int cells = g_battery_cells;
+        if (cells && v < g_flight.cfg.vbat_warn_cell * (float)cells && (tick % 20) == 0) {
             beep(200);
         }
         vTaskDelay(pdMS_TO_TICKS(100));
@@ -412,7 +479,6 @@ int main(void)
 
     /* Motoren zuerst: der ESC soll sofort "0" sehen */
     dshot_init(DSHOT_RATE);
-    rx_uart_init(CRSF_BAUDRATE);
 
     /* Blackbox-Flash: Ende der bisherigen Daten suchen (wenige ms) */
     flight_default_config(&boot_cfg);
@@ -422,6 +488,8 @@ int main(void)
         bb_init(&g_blackbox, &flash_ops);
         g_cfg_from_flash = config_store_load(&boot_cfg) > 0;
     }
+    /* Empfaenger: fest eingestellter UART oder automatische Suche (rx_uart = 0) */
+    rx_uart_init((int)boot_cfg.rx_uart, CRSF_BAUDRATE);
 
     icm42688_drdy_callback = on_gyro_drdy;
     if (!icm42688_init(LOOP_ODR)) {

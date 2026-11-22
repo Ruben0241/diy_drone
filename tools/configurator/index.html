@@ -1,0 +1,1730 @@
+<!doctype html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>DIY Drone Configurator</title>
+<style>
+  :root {
+    --bg: #18191c; --panel: #23252a; --panel2: #2c2f35; --line: #3a3e46;
+    --text: #e8e8e8; --dim: #9aa0aa; --accent: #ffbb00; --accent2: #ffd25a;
+    --ok: #43b047; --warn: #f0a020; --err: #e5453b; --blue: #3a8eea; --orange: #f07c2a;
+    --r: #ef5350; --p: #66bb6a; --y: #42a5f5;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; background: var(--bg); color: var(--text);
+    font: 14px/1.4 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; }
+  button, input, select { font: inherit; color: inherit; }
+  #app { display: grid; grid-template-columns: 200px 1fr; grid-template-rows: 56px 1fr 28px; height: 100vh; }
+  header { grid-column: 1 / 3; display: flex; align-items: center; gap: 14px; padding: 0 14px;
+    background: #111214; border-bottom: 1px solid var(--line); }
+  .logo { font-weight: 800; letter-spacing: .5px; color: var(--accent); font-size: 17px; white-space: nowrap; }
+  .logo small { color: var(--dim); font-weight: 500; letter-spacing: 0; margin-left: 6px; }
+  .chips { display: flex; gap: 6px; flex: 1; flex-wrap: wrap; overflow: hidden; height: 28px; }
+  .chip { padding: 3px 9px; border-radius: 4px; background: var(--panel2); color: var(--dim); font-size: 12px;
+    font-weight: 600; white-space: nowrap; border: 1px solid transparent; }
+  .chip.ok { color: #c8f0c9; background: #1f3a22; border-color: #2f5a33; }
+  .chip.warn { color: #ffe2a8; background: #3d2f10; border-color: #6a5016; }
+  .chip.err { color: #ffd0cc; background: #4a1714; border-color: #7a2520; }
+  .chip.armed { color: #fff; background: var(--err); }
+  .conn { display: flex; gap: 8px; align-items: center; }
+  .btn { background: var(--panel2); border: 1px solid var(--line); border-radius: 5px; padding: 6px 12px;
+    cursor: pointer; white-space: nowrap; }
+  .btn:hover:not(:disabled) { border-color: var(--accent); }
+  .btn:disabled { opacity: .45; cursor: not-allowed; }
+  .btn.primary { background: var(--accent); color: #1a1a1a; border-color: var(--accent); font-weight: 700; }
+  .btn.primary:hover:not(:disabled) { background: var(--accent2); }
+  .btn.danger { background: #5a1a16; border-color: #8a2a22; color: #ffd8d4; }
+  .btn.big { padding: 10px 18px; font-size: 15px; }
+  nav { background: #141518; border-right: 1px solid var(--line); padding: 10px 0; overflow-y: auto; }
+  nav a { display: flex; gap: 10px; align-items: center; padding: 9px 16px; color: var(--dim); text-decoration: none;
+    cursor: pointer; border-left: 3px solid transparent; user-select: none; }
+  nav a:hover { color: var(--text); background: #1c1e22; }
+  nav a.active { color: var(--text); background: #222429; border-left-color: var(--accent); }
+  nav a .ico { width: 18px; text-align: center; opacity: .85; }
+  nav a.disabled { opacity: .35; pointer-events: none; }
+  main { overflow-y: auto; padding: 18px 22px 80px; position: relative; }
+  footer { grid-column: 1 / 3; display: flex; gap: 18px; align-items: center; padding: 0 14px; font-size: 12px;
+    color: var(--dim); background: #111214; border-top: 1px solid var(--line); }
+  footer .sp { flex: 1; }
+  section.tab { display: none; }
+  section.tab.active { display: block; }
+  h1 { font-size: 20px; margin: 0 0 4px; }
+  h2 { font-size: 15px; margin: 0 0 10px; color: var(--accent); font-weight: 700; }
+  .sub { color: var(--dim); margin: 0 0 16px; }
+  .grid { display: grid; gap: 14px; }
+  .g2 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .g3 { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  @media (max-width: 1200px) { .g3 { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+  @media (max-width: 900px) { .g2, .g3 { grid-template-columns: 1fr; } }
+  .panel { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 14px 16px; }
+  .kv { display: grid; grid-template-columns: auto 1fr; gap: 4px 14px; font-size: 13px; }
+  .kv .k { color: var(--dim); }
+  .mono { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+  .muted { color: var(--dim); }
+  .row { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+  .sp { flex: 1; }
+  .banner { border-radius: 8px; padding: 12px 14px; margin-bottom: 14px; border: 1px solid; }
+  .banner.warn { background: #3a2c0e; border-color: #6a5016; color: #ffe4a8; }
+  .banner.err { background: #3e1512; border-color: #7a2520; color: #ffd6d1; }
+  .banner.info { background: #142a40; border-color: #24496e; color: #cfe5ff; }
+  .banner.ok { background: #18331b; border-color: #2f5a33; color: #cdf0cf; }
+  canvas { display: block; width: 100%; }
+  /* Arming */
+  .armlist { list-style: none; margin: 0; padding: 0; }
+  .armlist li { display: flex; gap: 10px; padding: 5px 0; border-bottom: 1px solid #30333a; align-items: baseline; }
+  .armlist li:last-child { border-bottom: 0; }
+  .dot { width: 10px; height: 10px; border-radius: 50%; flex: none; margin-top: 3px; background: var(--ok); }
+  .dot.err { background: var(--err); }
+  .armlist .hint { color: var(--dim); font-size: 12px; }
+  .bigstate { font-size: 22px; font-weight: 800; margin: 4px 0 10px; }
+  .bigstate.ok { color: var(--ok); } .bigstate.err { color: var(--err); } .bigstate.armed { color: var(--err); }
+  /* Balken */
+  .bar { position: relative; height: 22px; background: #1b1d21; border: 1px solid var(--line); border-radius: 4px; overflow: hidden; }
+  .bar .fill { position: absolute; top: 0; bottom: 0; left: 0; background: var(--accent); opacity: .85; }
+  .bar .mid { position: absolute; top: 0; bottom: 0; left: 50%; width: 1px; background: #555; }
+  .bar .val { position: absolute; right: 8px; top: 1px; font-size: 12px; font-weight: 600; text-shadow: 0 0 3px #000; }
+  .chrow { display: grid; grid-template-columns: 110px 1fr; gap: 10px; align-items: center; margin-bottom: 7px; }
+  /* Tabellen / Eingaben */
+  table { border-collapse: collapse; width: 100%; }
+  th, td { text-align: left; padding: 6px 8px; border-bottom: 1px solid #30333a; vertical-align: middle; }
+  th { color: var(--dim); font-weight: 600; font-size: 12px; text-transform: uppercase; letter-spacing: .4px; }
+  input[type=number], input[type=text], select { background: #17181b; border: 1px solid var(--line); border-radius: 4px;
+    padding: 5px 7px; width: 100%; min-width: 0; }
+  input[type=number]:focus, input[type=text]:focus, select:focus { outline: none; border-color: var(--accent); }
+  input.changed, select.changed { border-color: var(--accent); background: #2a2410; }
+  input.nondef, select.nondef { color: var(--accent2); }
+  .pidtable td:first-child { font-weight: 700; width: 70px; }
+  .pidtable input { width: 80px; text-align: right; }
+  .field { display: grid; grid-template-columns: 1fr 120px; gap: 10px; align-items: center; padding: 5px 0;
+    border-bottom: 1px solid #2e3137; }
+  .field:last-child { border-bottom: 0; }
+  .field label { font-size: 13px; }
+  .field label small { display: block; color: var(--dim); font-size: 11.5px; }
+  /* Speicherleiste */
+  #savebar { position: fixed; left: 200px; right: 0; bottom: 28px; background: #2a2410; border-top: 2px solid var(--accent);
+    padding: 10px 22px; display: none; align-items: center; gap: 12px; z-index: 10; }
+  #savebar.show { display: flex; }
+  /* Motoren */
+  .motorwrap { display: grid; grid-template-columns: 320px 1fr; gap: 14px; }
+  @media (max-width: 1000px) { .motorwrap { grid-template-columns: 1fr; } }
+  .sliders { display: grid; grid-template-columns: repeat(5, 1fr); gap: 12px; height: 300px; }
+  .slider { display: flex; flex-direction: column; align-items: center; gap: 8px; }
+  .slider .vbar { position: relative; flex: 1; width: 44px; background: #1b1d21; border: 1px solid var(--line); border-radius: 5px; overflow: hidden; }
+  .slider .vbar .fill { position: absolute; left: 0; right: 0; bottom: 0; background: var(--accent); }
+  .slider .vbar .tick { position: absolute; left: 0; right: 0; height: 1px; background: #444; }
+  .slider input[type=range] { writing-mode: vertical-lr; direction: rtl; width: 30px; flex: 1; accent-color: var(--accent); }
+  .slider .lab { font-weight: 700; }
+  .slider .num { font-size: 12px; color: var(--dim); }
+  .safety { display: flex; gap: 10px; align-items: center; padding: 12px 14px; background: #3a1512; border: 1px solid #7a2520;
+    border-radius: 8px; margin-bottom: 14px; font-weight: 600; }
+  .safety input { width: 20px; height: 20px; accent-color: var(--err); }
+  /* Bodentest */
+  .steps { counter-reset: st; }
+  .step { display: grid; grid-template-columns: 34px 1fr 230px; gap: 12px; align-items: center; padding: 11px 0;
+    border-bottom: 1px solid #30333a; }
+  .step .n { width: 28px; height: 28px; border-radius: 50%; background: var(--panel2); display: grid; place-items: center; font-weight: 700; }
+  .step.active { background: #262a31; margin: 0 -10px; padding-left: 10px; padding-right: 10px; border-radius: 6px; }
+  .step.active .n { background: var(--accent); color: #1a1a1a; }
+  .step.pass .n { background: var(--ok); color: #fff; }
+  .step.fail .n { background: var(--err); color: #fff; }
+  .step .t { font-weight: 600; }
+  .step .d { color: var(--dim); font-size: 12.5px; }
+  .meter { height: 10px; background: #1b1d21; border-radius: 5px; position: relative; overflow: hidden; margin-top: 6px; }
+  .meter .c { position: absolute; left: 50%; top: 0; bottom: 0; width: 1px; background: #666; }
+  .meter .f { position: absolute; top: 0; bottom: 0; background: var(--accent); }
+  /* CLI */
+  #term { background: #0d0e10; border: 1px solid var(--line); border-radius: 6px; height: calc(100vh - 290px); min-height: 260px;
+    overflow-y: auto; padding: 10px 12px; margin: 0; white-space: pre-wrap; word-break: break-all; font-size: 12.5px; }
+  #term .in { color: var(--accent); } #term .err { color: #ff8a80; } #term .ok { color: #9ccc9f; } #term .sys { color: var(--dim); }
+  .progress { height: 8px; background: #1b1d21; border-radius: 4px; overflow: hidden; }
+  .progress > div { height: 100%; width: 0; background: var(--accent); transition: width .1s; }
+  .legend { display: flex; gap: 12px; font-size: 12px; color: var(--dim); margin-bottom: 4px; }
+  .legend i { display: inline-block; width: 10px; height: 3px; vertical-align: middle; margin-right: 4px; }
+  .welcome { max-width: 760px; margin: 40px auto; text-align: center; }
+  .welcome h1 { font-size: 28px; }
+  .welcome .cards { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; margin-top: 26px; text-align: left; }
+  kbd { background: #2c2f35; border: 1px solid #444; border-bottom-width: 2px; border-radius: 3px; padding: 0 5px; font-size: 12px; }
+  .toast { position: fixed; right: 18px; bottom: 96px; background: var(--panel2); border: 1px solid var(--line); border-left: 4px solid var(--accent);
+    padding: 10px 14px; border-radius: 6px; max-width: 420px; z-index: 50; box-shadow: 0 6px 24px #0008; }
+  .toast.err { border-left-color: var(--err); } .toast.ok { border-left-color: var(--ok); }
+  dialog { background: var(--panel); color: var(--text); border: 1px solid var(--line); border-radius: 10px; max-width: 480px; padding: 18px 20px; }
+  dialog::backdrop { background: #000a; }
+  .tag { display: inline-block; font-size: 11px; padding: 1px 6px; border-radius: 3px; background: var(--panel2); color: var(--dim); margin-left: 6px; }
+</style>
+</head>
+<body>
+<div id="app">
+  <header>
+    <div class="logo">DIY DRONE FC <small>Configurator</small></div>
+    <div class="chips" id="chips"></div>
+    <div class="conn">
+      <span id="connInfo" class="muted" style="font-size:12px"></span>
+      <button class="btn" id="btnDemo" title="Ohne Drohne ausprobieren">Demo</button>
+      <button class="btn primary" id="btnConnect">Verbinden</button>
+    </div>
+  </header>
+
+  <nav id="nav">
+    <a data-tab="setup" class="active"><span class="ico">◎</span>Übersicht</a>
+    <a data-tab="receiver"><span class="ico">📡</span>Empfänger</a>
+    <a data-tab="motors"><span class="ico">⚙</span>Motoren</a>
+    <a data-tab="pid"><span class="ico">⚖</span>PID &amp; Rates</a>
+    <a data-tab="filters"><span class="ico">∿</span>Filter</a>
+    <a data-tab="sensors"><span class="ico">📈</span>Sensoren</a>
+    <a data-tab="groundtest"><span class="ico">✓</span>Bodentest</a>
+    <a data-tab="config"><span class="ico">☰</span>Alle Einstellungen</a>
+    <a data-tab="blackbox"><span class="ico">▤</span>Flugdaten</a>
+    <a data-tab="cli"><span class="ico">›_</span>CLI</a>
+  </nav>
+
+  <main id="main">
+    <!-- ======================= Willkommen ======================= -->
+    <section class="tab" id="tab-welcome">
+      <div class="welcome">
+        <h1>Eigene Flugsteuerung · GEPRC TAKER F722</h1>
+        <p class="muted">Configurator für die Firmware <span class="mono">diy_drone</span> (Build B). Verbindung über USB direkt aus dem Browser (Web Serial, Chrome oder Edge).</p>
+        <div class="row" style="justify-content:center;margin-top:18px">
+          <button class="btn primary big" id="btnConnect2">Mit Drohne verbinden</button>
+          <button class="btn big" id="btnDemo2">Demo ohne Drohne</button>
+        </div>
+        <div id="noSerial" class="banner err" style="display:none;margin-top:18px;text-align:left">
+          Dieser Browser kann nicht auf USB-Geräte zugreifen (Web Serial fehlt). Bitte <b>Google Chrome</b> oder <b>Microsoft Edge</b> auf dem Computer verwenden.
+          Der Demo-Modus funktioniert trotzdem.
+        </div>
+        <div class="cards">
+          <div class="panel"><h2>Vor dem Verbinden</h2>
+            <div class="muted">Drohne per USB anschliessen. Für Motortests zusätzlich den Akku über den Smoke Stopper – <b style="color:var(--err)">immer ohne Propeller</b>.</div></div>
+          <div class="panel"><h2>Läuft noch Betaflight?</h2>
+            <div class="muted">Dann den Betaflight Configurator verwenden. Dieser Configurator spricht nur mit der eigenen Firmware (USB-ID 1209:0001).</div></div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ======================= Übersicht ======================= -->
+    <section class="tab" id="tab-setup">
+      <h1>Übersicht</h1>
+      <p class="sub">Lage live, Arming-Status und Kalibrierung. Drohne bewegen: das Modell muss genau gleich mitkippen.</p>
+      <div class="grid g2">
+        <div class="panel">
+          <div class="row"><h2 style="margin:0">Lage</h2><span class="sp"></span>
+            <button class="btn" id="btnYawZero" title="Gierwinkel der Anzeige auf 0 setzen">Yaw 0</button></div>
+          <canvas id="cv3d" height="330"></canvas>
+          <div class="row mono" style="justify-content:space-around;font-size:15px;margin-top:6px">
+            <span>Roll <b id="attR">–</b>°</span><span>Pitch <b id="attP">–</b>°</span><span>Yaw <b id="attY">–</b>°</span>
+          </div>
+        </div>
+        <div class="grid" style="gap:14px;align-content:start">
+          <div class="panel">
+            <h2>Arming</h2>
+            <div class="bigstate" id="armState">–</div>
+            <ul class="armlist" id="armList"></ul>
+          </div>
+          <div class="panel">
+            <h2>Kalibrierung</h2>
+            <div class="row">
+              <button class="btn" id="btnGyroCal">Gyro kalibrieren</button>
+              <button class="btn" id="btnAccCal">ACC kalibrieren (waagrecht!)</button>
+              <span class="sp"></span>
+              <span class="muted" id="calInfo"></span>
+            </div>
+            <div class="muted" style="margin-top:8px;font-size:12.5px">ACC-Kalibrierung nur auf ebener Fläche (Wasserwaage). Danach unten <b>Speichern</b>.</div>
+          </div>
+          <div class="panel">
+            <h2>System</h2>
+            <div class="kv" id="sysInfo"></div>
+            <div class="row" style="margin-top:12px">
+              <button class="btn" id="btnInfo">Aktualisieren</button>
+              <span class="sp"></span>
+              <button class="btn" id="btnReboot">Neustart</button>
+              <button class="btn" id="btnDfu" title="Bootloader zum Flashen starten">Bootloader (DFU)</button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ======================= Empfänger ======================= -->
+    <section class="tab" id="tab-receiver">
+      <h1>Empfänger</h1>
+      <p class="sub">ELRS über CRSF. Kanäle in µs wie in Betaflight (988 … 2012). Belegung AETR: 1 Roll, 2 Pitch, 3 Gas, 4 Yaw, 5 Arm, 6 Angle-Mode.</p>
+      <div class="grid g2">
+        <div class="panel"><h2>Kanäle</h2><div id="chBars"></div></div>
+        <div class="grid" style="gap:14px;align-content:start">
+          <div class="panel"><h2>Sticks → Soll-Drehrate</h2>
+            <canvas id="cvSticks" height="170"></canvas>
+            <div class="row mono" style="justify-content:space-around;margin-top:6px">
+              <span>Roll <b id="spR">–</b></span><span>Pitch <b id="spP">–</b></span><span>Yaw <b id="spY">–</b></span><span class="muted">°/s</span>
+            </div>
+          </div>
+          <div class="panel"><h2>Verbindung</h2>
+            <div class="kv" id="rxInfo"></div>
+          </div>
+          <div class="panel"><h2>Anschluss</h2>
+            <div class="field"><label>Empfänger-UART<small>Automatisch: die Firmware sucht UART 1, 2, 3, 4 und 6 ab</small></label><div id="f_rx_uart"></div></div>
+            <div class="field"><label>Telemetrie an die Fernsteuerung<small>Akkuspannung (RxBt, Bat%) und Flugmodus auf der RadioMaster</small></label><div id="f_crsf_telemetry"></div></div>
+            <div class="field"><label>Stick-Totband<small>Bereich um die Mitte ohne Wirkung (0 … 1)</small></label><div id="f_deadband"></div></div>
+            <div class="muted" style="font-size:12px;margin-top:6px">UART-Änderung wirkt nach Speichern + Neustart.</div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ======================= Motoren ======================= -->
+    <section class="tab" id="tab-motors">
+      <h1>Motoren</h1>
+      <p class="sub">Motortest, Reihenfolge und Drehrichtung prüfen. Max. 40 %. Stoppt sofort beim Verlassen des Tabs, mit <kbd>Leertaste</kbd>/<kbd>Esc</kbd> und nach 0.6 s ohne Verbindung.</p>
+      <label class="safety"><input type="checkbox" id="propsOff">Ich habe <u>alle Propeller entfernt</u> und verstehe, dass die Motoren gleich drehen.</label>
+      <div class="motorwrap">
+        <div class="panel">
+          <h2>Position und Drehrichtung</h2>
+          <canvas id="cvQuad" height="300"></canvas>
+          <div class="muted" style="font-size:12px">Ansicht von oben, Nase oben. Farben: <span style="color:var(--blue)">● im Uhrzeigersinn</span>, <span style="color:var(--orange)">● gegen den Uhrzeigersinn</span> (Betaflight «Props in»<span id="propsDirNote"></span>).</div>
+        </div>
+        <div class="panel">
+          <div class="row"><h2 style="margin:0">Motortest</h2><span class="sp"></span>
+            <button class="btn danger big" id="btnMotorStop">STOP</button></div>
+          <div class="sliders" style="margin-top:12px" id="sliders"></div>
+          <div class="kv" style="margin-top:12px" id="motorInfo"></div>
+        </div>
+      </div>
+      <div class="panel" style="margin-top:14px">
+        <div class="row"><h2 style="margin:0">Motor-Reihenfolge einrichten</h2><span class="sp"></span>
+          <button class="btn" id="btnMapStart">Assistent starten</button></div>
+        <div class="muted" style="margin-top:6px">Dreht nacheinander jeden Ausgang kurz an (8 %). Klicke im Bild auf die Position, an der sich der Motor gedreht hat. Danach stimmt <span class="mono">motor1_out … motor4_out</span>.</div>
+        <div id="mapWizard" style="margin-top:10px"></div>
+      </div>
+    </section>
+
+    <!-- ======================= PID ======================= -->
+    <section class="tab" id="tab-pid">
+      <h1>PID &amp; Rates</h1>
+      <p class="sub">Gleiche Zahlen und Skalierung wie Betaflight. Geänderte Felder sind gelb umrandet, Werte ≠ Standard gelb.</p>
+      <div class="grid g2">
+        <div class="panel">
+          <h2>PID-Regler</h2>
+          <table class="pidtable"><thead><tr><th></th><th>P</th><th>I</th><th>D</th><th>F (Feedforward)</th></tr></thead>
+            <tbody id="pidBody"></tbody></table>
+          <div style="margin-top:14px" id="pidExtra"></div>
+        </div>
+        <div class="panel">
+          <h2>Rates (Actual)</h2>
+          <table class="pidtable"><thead><tr><th></th><th>Mitte °/s</th><th>Max °/s</th><th>Expo</th></tr></thead>
+            <tbody id="rateBody"></tbody></table>
+          <canvas id="cvRates" height="230" style="margin-top:12px"></canvas>
+          <div class="legend" style="margin-top:4px"><span><i style="background:var(--r)"></i>Roll</span><span><i style="background:var(--p)"></i>Pitch</span><span><i style="background:var(--y)"></i>Yaw</span><span class="sp"></span><span id="rateNow"></span></div>
+          <div style="margin-top:10px" id="angleExtra"></div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ======================= Filter ======================= -->
+    <section class="tab" id="tab-filters">
+      <h1>Filter</h1>
+      <p class="sub">Regelschleife 1 kHz → Nyquist 500 Hz. Typ 0 = aus, PT1 = 1. Ordnung, Biquad = 2. Ordnung.</p>
+      <div class="grid g2">
+        <div class="panel"><h2>Gyro</h2><div id="filtGyro"></div></div>
+        <div class="panel"><h2>D-Term &amp; Sonstige</h2><div id="filtD"></div></div>
+      </div>
+      <div class="panel" style="margin-top:14px">
+        <h2>Frequenzgang (Betrag)</h2>
+        <canvas id="cvFilter" height="220"></canvas>
+        <div class="legend"><span><i style="background:var(--accent)"></i>Gyro gesamt</span><span><i style="background:var(--y)"></i>D-Term gesamt (ohne Gyro)</span></div>
+      </div>
+    </section>
+
+    <!-- ======================= Sensoren ======================= -->
+    <section class="tab" id="tab-sensors">
+      <div class="row"><div><h1>Sensoren</h1><p class="sub">Live-Daten mit 50 Hz (gefilterte Werte wie in der Regelung).</p></div>
+        <span class="sp"></span><button class="btn" id="btnPause">Pause</button></div>
+      <div class="grid g2">
+        <div class="panel"><h2>Gyro °/s</h2><div class="legend"><span><i style="background:var(--r)"></i>Roll</span><span><i style="background:var(--p)"></i>Pitch</span><span><i style="background:var(--y)"></i>Yaw</span></div><canvas id="chGyro" height="200"></canvas></div>
+        <div class="panel"><h2>Soll / Ist Roll °/s</h2><div class="legend"><span><i style="background:#fff"></i>Soll</span><span><i style="background:var(--r)"></i>Ist (Gyro)</span></div><canvas id="chSpR" height="200"></canvas></div>
+        <div class="panel"><h2>Beschleunigung g</h2><div class="legend"><span><i style="background:var(--r)"></i>X</span><span><i style="background:var(--p)"></i>Y</span><span><i style="background:var(--y)"></i>Z</span></div><canvas id="chAcc" height="200"></canvas></div>
+        <div class="panel"><h2>Lage °</h2><div class="legend"><span><i style="background:var(--r)"></i>Roll</span><span><i style="background:var(--p)"></i>Pitch</span></div><canvas id="chAtt" height="200"></canvas></div>
+      </div>
+    </section>
+
+    <!-- ======================= Bodentest ======================= -->
+    <section class="tab" id="tab-groundtest">
+      <h1>Bodentest (Manöver M0)</h1>
+      <p class="sub">Wie <span class="mono">docs/bodentest.md</span>, aber mit automatischer Erkennung. <b>Akku ab, nur USB</b> (die Sticks brauchen die Fernsteuerung). Falsche Vorzeichen werden mit einem Klick korrigiert.</p>
+      <div class="panel">
+        <div class="steps" id="steps"></div>
+        <div class="row" style="margin-top:14px">
+          <button class="btn" id="btnStepsReset">Neu beginnen</button>
+          <span class="sp"></span>
+          <button class="btn" id="btnProtocol">Testprotokoll speichern (.md)</button>
+        </div>
+      </div>
+    </section>
+
+    <!-- ======================= Alle Einstellungen ======================= -->
+    <section class="tab" id="tab-config">
+      <div class="row"><div><h1>Alle Einstellungen</h1><p class="sub">Alle Parameter der Firmware (Namen wie Betaflight, wo möglich).</p></div></div>
+      <div class="row" style="margin-bottom:12px">
+        <input type="text" id="paramFilter" placeholder="Suchen … (z. B. pid, gyro, motor)" style="max-width:320px">
+        <label class="row" style="gap:6px"><input type="checkbox" id="onlyDiff">nur Abweichungen</label>
+        <span class="sp"></span>
+        <button class="btn" id="btnExport">Sichern (diff → .txt)</button>
+        <button class="btn" id="btnImport">Laden (.txt)</button>
+        <input type="file" id="fileImport" accept=".txt,text/plain" style="display:none">
+        <button class="btn danger" id="btnDefaults">Alles auf Standard</button>
+      </div>
+      <div class="panel" style="padding:4px 8px">
+        <table><thead><tr><th>Name</th><th style="width:150px">Wert</th><th>Standard</th><th>Bereich</th><th>Beschreibung</th></tr></thead>
+          <tbody id="paramBody"></tbody></table>
+      </div>
+    </section>
+
+    <!-- ======================= Flugdaten ======================= -->
+    <section class="tab" id="tab-blackbox">
+      <h1>Flugdaten (Blackbox)</h1>
+      <p class="sub">1 kHz, nur armed, 16-MB-Flash (ca. 8.7 min). Download → eine CSV pro Flug, gleiches Format wie <span class="mono">tools/fc_cli.py dump</span> (direkt für <span class="mono">fc_analysis.py</span>).</p>
+      <div class="grid g2">
+        <div class="panel">
+          <h2>Speicher</h2>
+          <div class="progress" style="height:14px"><div id="flashBar"></div></div>
+          <div class="kv" style="margin-top:10px" id="flashInfo"></div>
+          <div class="row" style="margin-top:14px">
+            <label class="muted">Präfix <input type="text" id="dumpPrefix" style="width:120px"></label>
+            <span class="sp"></span>
+            <button class="btn primary" id="btnDump">Herunterladen</button>
+            <button class="btn danger" id="btnErase">Löschen</button>
+          </div>
+          <div style="margin-top:12px;display:none" id="dumpProg"><div class="progress"><div id="dumpBar"></div></div><div class="muted" id="dumpTxt" style="font-size:12px;margin-top:4px"></div></div>
+        </div>
+        <div class="panel">
+          <h2>Flüge</h2>
+          <div id="flightList" class="muted">Noch nichts heruntergeladen.</div>
+        </div>
+      </div>
+      <div class="panel" style="margin-top:14px;display:none" id="flightPlotPanel">
+        <div class="row"><h2 style="margin:0" id="flightPlotTitle">Flug</h2><span class="sp"></span>
+          <select id="flightAxis" style="width:140px"><option value="0">Roll</option><option value="1">Pitch</option><option value="2">Yaw</option></select></div>
+        <div class="legend" style="margin-top:8px"><span><i style="background:#fff"></i>Soll</span><span><i style="background:var(--accent)"></i>Ist</span><span><i style="background:#888"></i>Gas (0 % unten … 100 % oben)</span></div>
+        <canvas id="cvFlight" height="260"></canvas>
+      </div>
+    </section>
+
+    <!-- ======================= CLI ======================= -->
+    <section class="tab" id="tab-cli">
+      <h1>CLI</h1>
+      <p class="sub">Befehlszeile der Firmware (<span class="mono">help</span>). <kbd>↑</kbd>/<kbd>↓</kbd> Verlauf. Wie <span class="mono">python tools/fc_cli.py term</span>.</p>
+      <pre id="term" class="mono"></pre>
+      <div class="row" style="margin-top:10px">
+        <input type="text" id="cliIn" class="mono" placeholder="Befehl eingeben, Enter" style="flex:1" autocomplete="off" spellcheck="false">
+        <button class="btn" data-cli="help">help</button><button class="btn" data-cli="info">info</button>
+        <button class="btn" data-cli="diff">diff</button><button class="btn" id="btnCliClear">leeren</button>
+      </div>
+    </section>
+
+    <div id="savebar">
+      <b>Ungespeicherte Änderungen</b><span id="saveCount" class="muted"></span>
+      <span class="sp"></span>
+      <button class="btn" id="btnDiscard">Verwerfen</button>
+      <button class="btn primary" id="btnSave">Speichern</button>
+    </div>
+  </main>
+
+  <footer>
+    <span id="fStatus">Nicht verbunden</span>
+    <span id="fFw"></span>
+    <span id="fRate"></span>
+    <span id="fLoop"></span>
+    <span class="sp"></span>
+    <span>Eigene Firmware diy_drone · Maturaarbeit KZU · Teile mit KI-Unterstützung erstellt</span>
+  </footer>
+</div>
+
+<dialog id="dlg"><h2 id="dlgTitle"></h2><div id="dlgText"></div>
+  <div class="row" style="margin-top:16px"><span class="sp"></span><button class="btn" id="dlgNo">Abbrechen</button><button class="btn primary" id="dlgYes">OK</button></div></dialog>
+
+<script src="protocol.js"></script>
+<script src="mock.js"></script>
+<script>
+'use strict';
+/* =====================================================================
+ * Configurator fuer die eigene Firmware (Build B)
+ * Verbindung: Web Serial (USB-CDC der Firmware, 1209:0001) oder Demo (mock.js)
+ * ===================================================================== */
+
+const $ = id => document.getElementById(id);
+const el = (tag, attrs = {}, ...kids) => {
+  const e = document.createElement(tag);
+  for (const [k, v] of Object.entries(attrs)) {
+    if (k === 'class') e.className = v;
+    else if (k === 'style') e.style.cssText = v;
+    else if (k.startsWith('on')) e.addEventListener(k.slice(2), v);
+    else if (v !== undefined && v !== null && v !== false) e.setAttribute(k, v === true ? '' : v);
+  }
+  for (const c of kids.flat()) if (c !== null && c !== undefined) e.append(c.nodeType ? c : document.createTextNode(String(c)));
+  return e;
+};
+const AX = ['roll', 'pitch', 'yaw'];
+const AXDE = ['Roll', 'Pitch', 'Yaw'];
+const COL = { r: '#ef5350', p: '#66bb6a', y: '#42a5f5', accent: '#ffbb00' };
+const TLM_HZ = 50;
+const MOTOR_KEEPALIVE_MS = 250;
+const MOTOR_TIMEOUT_MS = 600;
+
+/* ---------- Beschreibungen der Einstellungen ---------- */
+const PINFO = {
+  p_roll: 'P Roll', i_roll: 'I Roll', d_roll: 'D Roll', f_roll: 'Feedforward Roll',
+  p_pitch: 'P Pitch', i_pitch: 'I Pitch', d_pitch: 'D Pitch', f_pitch: 'Feedforward Pitch',
+  p_yaw: 'P Yaw', i_yaw: 'I Yaw', d_yaw: 'D Yaw', f_yaw: 'Feedforward Yaw',
+  iterm_limit: 'Grenze des I-Anteils (Betaflight 400)',
+  pidsum_limit: 'Grenze der PID-Summe Roll (Betaflight 500)', pidsum_limit_pitch: 'Grenze der PID-Summe Pitch', pidsum_limit_yaw: 'Grenze der PID-Summe Yaw (400)',
+  iterm_relax: 'I-Term-Relax: 0 aus, 1 Roll/Pitch, 2 Roll/Pitch/Yaw', iterm_relax_cutoff: 'I-Term-Relax Grenzfrequenz [Hz]',
+  iterm_windup: 'I-Grenze in % der PID-Summe (Betaflight 80)', iterm_mix_windup: 'I bremsen ab Mischer-Sättigung (1 = aus)',
+  yaw_lowpass_hz: 'Tiefpass auf Yaw-P [Hz] (0 = aus)', tpa_rate: 'TPA: D-Abschwächung bei Vollgas (0 … 1)', tpa_breakpoint: 'TPA ab Gas (0 … 1)',
+  gyro_lpf1_type: 'Gyro-Tiefpass 1: Typ', gyro_lpf1_hz: 'Gyro-Tiefpass 1 [Hz]', gyro_lpf2_type: 'Gyro-Tiefpass 2: Typ', gyro_lpf2_hz: 'Gyro-Tiefpass 2 [Hz]',
+  gyro_notch_hz: 'Gyro-Notch Mitte [Hz] (0 = aus)', gyro_notch_cutoff: 'Gyro-Notch untere Grenze [Hz]',
+  dterm_lpf1_type: 'D-Tiefpass 1: Typ', dterm_lpf1_hz: 'D-Tiefpass 1 [Hz]', dterm_lpf2_type: 'D-Tiefpass 2: Typ', dterm_lpf2_hz: 'D-Tiefpass 2 [Hz]',
+  acc_lpf_hz: 'ACC-Tiefpass [Hz]', rc_smoothing_hz: 'Stick-Glättung [Hz] (0 = aus)', ff_smoothing_hz: 'Feedforward-Glättung [Hz]',
+  roll_center: 'Rate Mitte Roll [°/s]', roll_max: 'Max. Drehrate Roll [°/s]', roll_expo: 'Expo Roll',
+  pitch_center: 'Rate Mitte Pitch [°/s]', pitch_max: 'Max. Drehrate Pitch [°/s]', pitch_expo: 'Expo Pitch',
+  yaw_center: 'Rate Mitte Yaw [°/s]', yaw_max: 'Max. Drehrate Yaw [°/s]', yaw_expo: 'Expo Yaw',
+  deadband: 'Stick-Totband (0 … 1)',
+  angle_limit: 'Angle-Mode: max. Neigung [°]', angle_p: 'Angle-Mode: Verstärkung [°/s pro °]',
+  imu_kp: 'Lageschätzung: Gewicht ACC (Mahony Kp)', imu_ki: 'Lageschätzung: Mahony Ki',
+  motor_idle: 'Leerlauf armed (0.055 = 5.5 %)', arm_throttle_max: 'Armen nur unter diesem Gas',
+  arm_angle_max: 'Armen nur flacher als [°]', low_throttle: 'Gas «unten» (Regelung aus ohne Airmode)',
+  airmode_start: 'Airmode ab Gas', runaway_prevention: 'Runaway-Schutz (1 = an)',
+  gyro_sign_roll: 'Vorzeichen Gyro Roll', gyro_sign_pitch: 'Vorzeichen Gyro Pitch', gyro_sign_yaw: 'Vorzeichen Gyro Yaw',
+  stick_sign_roll: 'Vorzeichen Stick Roll', stick_sign_pitch: 'Vorzeichen Stick Pitch', stick_sign_yaw: 'Vorzeichen Stick Yaw (Standard −1)',
+  yaw_motors_reversed: 'Propeller «out» (umgekehrte Drehrichtung)',
+  acc_bias_x: 'ACC-Abgleich X [g]', acc_bias_y: 'ACC-Abgleich Y [g]', acc_bias_z: 'ACC-Abgleich Z [g]',
+  motor1_out: 'Ausgang für M1 (hinten rechts)', motor2_out: 'Ausgang für M2 (vorne rechts)',
+  motor3_out: 'Ausgang für M3 (hinten links)', motor4_out: 'Ausgang für M4 (vorne links)',
+  vbat_scale: 'Spannungsteiler Akku (Betaflight vbat_scale)', vbat_warn_cell: 'Akkuwarnung [V pro Zelle]',
+  rx_uart: 'Empfänger-UART (0 = automatisch)', crsf_telemetry: 'Telemetrie an die Fernsteuerung',
+};
+const SELECTS = {
+  filter: [[0, 'aus'], [1, 'PT1'], [2, 'Biquad']],
+  onoff: [[0, 'aus'], [1, 'an']],
+  sign: [[1, '+1'], [-1, '−1']],
+  relax: [[0, 'aus'], [1, 'Roll/Pitch'], [2, 'R/P/Yaw']],
+  uart: [[0, 'automatisch'], [1, 'UART 1'], [2, 'UART 2'], [3, 'UART 3'], [4, 'UART 4'], [6, 'UART 6']],
+  out: [[1, '1'], [2, '2'], [3, '3'], [4, '4']],
+};
+function selectKind(name) {
+  if (/_type$/.test(name)) return 'filter';
+  if (/^(gyro|stick)_sign_/.test(name)) return 'sign';
+  if (name === 'iterm_relax') return 'relax';
+  if (name === 'rx_uart') return 'uart';
+  if (/^motor\d_out$/.test(name)) return 'out';
+  if (['runaway_prevention', 'crsf_telemetry', 'yaw_motors_reversed'].includes(name)) return 'onoff';
+  return null;
+}
+
+/* =====================================================================
+ * Zustand
+ * ===================================================================== */
+const S = {
+  conn: null, connected: false, demo: false,
+  names: null, tlm: null, tlmCount: 0, tlmRate: 0,
+  params: new Map(), order: [], dirty: new Map(),
+  version: null, info: {},
+  tab: 'welcome', yawZero: 0, paused: false,
+  queue: Promise.resolve(), cmdId: 0, current: null,
+  dumpData: null, flights: [],
+};
+
+/* =====================================================================
+ * Verbindung
+ * ===================================================================== */
+class SerialTransport {
+  constructor(port) { this.port = port; this.onData = null; this.onClose = null; this.closing = false; }
+  async open() {
+    await this.port.open({ baudRate: 115200, bufferSize: 65536 });
+    try { await this.port.setSignals({ dataTerminalReady: true, requestToSend: true }); } catch (e) { /* egal */ }
+    this.writer = this.port.writable.getWriter();
+    this._loop();
+  }
+  async _loop() {
+    try {
+      while (this.port.readable && !this.closing) {
+        this.reader = this.port.readable.getReader();
+        try {
+          for (;;) {
+            const { value, done } = await this.reader.read();
+            if (done) break;
+            if (value && this.onData) this.onData(value);
+          }
+        } catch (e) { if (!this.closing) console.warn('Lesefehler', e); break; }
+        finally { try { this.reader.releaseLock(); } catch (e) { /* egal */ } }
+      }
+    } finally { if (!this.closing && this.onClose) this.onClose(); }
+  }
+  write(text) { return this.writer.write(new TextEncoder().encode(text)); }
+  async close() {
+    this.closing = true;
+    try { await this.reader?.cancel(); } catch (e) { /* egal */ }
+    try { this.writer?.releaseLock(); } catch (e) { /* egal */ }
+    try { await this.port.close(); } catch (e) { /* egal */ }
+  }
+}
+
+const splitter = new FC.StreamSplitter(onLine, bin => { S.dumpData = bin; });
+
+function onLine(line) {
+  if (line.startsWith('$T,')) {
+    const t = FC.parseTelemetry(line, S.names);
+    if (t) onTelemetry(t);
+    return;
+  }
+  if (line.startsWith('$H,')) { S.names = FC.parseHeader(line); return; }
+  const c = S.current;
+  if (c && line === '#' + c.id) { c.done(); return; }
+  if (/^#\d+$/.test(line)) return;                 /* Echo eines abgelaufenen Befehls */
+  if (c) {
+    c.lines.push(line);
+    if (c.onLine) c.onLine(line);
+    if (!c.quiet) termLine(line, /^ERR/.test(line) ? 'err' : /^OK/.test(line) ? 'ok' : '');
+  } else if (line.trim()) {
+    termLine(line, 'sys');
+  }
+}
+
+/* Befehl senden, Antwort-Zeilen bis zum Echo "#id" sammeln. Befehle laufen nacheinander. */
+function cmd(text, opt = {}) {
+  const run = () => new Promise((resolve, reject) => {
+    if (!S.conn) { reject(new Error('nicht verbunden')); return; }
+    const id = ++S.cmdId;
+    const c = { id, lines: [], quiet: !!opt.quiet, onLine: opt.onLine };
+    let timer = null;
+    c.done = () => { clearTimeout(timer); S.current = null; resolve(c.lines); };
+    timer = setTimeout(() => {
+      if (S.current === c) S.current = null;
+      if (opt.binary) splitter.expectBinary = false;
+      reject(new Error('Keine Antwort auf «' + text + '»'));
+    }, opt.timeout || 3000);
+    S.current = c;
+    if (opt.binary) { S.dumpData = null; splitter.expectBinary = true; }
+    if (!c.quiet) termLine('> ' + text, 'in');
+    S.conn.write(text + '\n' + 'echo #' + id + '\n').catch(e => { clearTimeout(timer); if (S.current === c) S.current = null; reject(e); });
+  });
+  const p = S.queue.then(run, run);
+  S.queue = p.catch(() => {});
+  return p;
+}
+const firstErr = lines => lines.find(l => l.startsWith('ERR'));
+
+async function connectSerial() {
+  if (!('serial' in navigator)) { toast('Web Serial fehlt: bitte Chrome oder Edge verwenden.', 'err'); return; }
+  let port;
+  try {
+    port = await navigator.serial.requestPort({ filters: [{ usbVendorId: 0x1209, usbProductId: 0x0001 }] });
+  } catch (e) {
+    const ok = await ask('Kein Gerät gewählt', 'Die eigene Firmware meldet sich als USB 1209:0001. Läuft auf dem Flightcontroller noch Betaflight, erscheint er hier nicht (dann Betaflight Configurator verwenden).<br><br>Alle seriellen Geräte anzeigen?', 'Alle anzeigen');
+    if (!ok) return;
+    try { port = await navigator.serial.requestPort(); } catch (e2) { return; }
+  }
+  await startSession(new SerialTransport(port), false);
+}
+
+async function connectDemo() { await startSession(new MockFC(), true); }
+
+async function startSession(transport, demo) {
+  if (S.conn) await disconnect();
+  S.conn = transport; S.demo = demo; S.names = null; S.tlm = null; S.version = null;
+  S.params.clear(); S.order = []; S.dirty.clear(); S.fcUnsaved = false;
+  transport.onData = b => splitter.push(b);
+  transport.onClose = () => { toast('Verbindung getrennt.', 'err'); disconnect(true); };
+  setStatus('Verbinde …');
+  try {
+    await transport.open();
+    await new Promise(r => setTimeout(r, 150));
+    await cmd('stream 0', { quiet: true, timeout: 2000 });
+    const v = await cmd('version', { quiet: true, timeout: 2000 });
+    S.version = v.map(FC.parseVersion).find(Boolean) || null;
+    if (!S.version) throw new Error('Firmware antwortet nicht auf «version». Läuft die eigene Firmware (nicht Betaflight)?');
+    await loadParams();
+    await refreshInfo();
+    await cmd('stream ' + TLM_HZ, { quiet: true });
+    S.connected = true;
+    termLine('Verbunden: ' + (demo ? 'DEMO' : S.version.board) + ', Firmware ' + S.version.fw, 'sys');
+    toast(demo ? 'Demo-Modus: simulierter Flightcontroller.' : 'Verbunden mit ' + S.version.board + '.', 'ok');
+    updateConnUI();
+    if (S.tab === 'welcome') showTab('setup');
+    buildParamUIs();
+  } catch (e) {
+    toast(e.message || String(e), 'err');
+    await disconnect(true);
+  }
+}
+
+async function disconnect(silent) {
+  motorsStop(true);
+  const c = S.conn;
+  S.conn = null; S.connected = false; S.tlm = null;
+  if (S.current) { S.current = null; }
+  S.queue = Promise.resolve();
+  if (c) { try { await c.close(); } catch (e) { /* egal */ } }
+  updateConnUI();
+  if (!silent) termLine('Getrennt.', 'sys');
+}
+
+/* =====================================================================
+ * Parameter
+ * ===================================================================== */
+async function loadParams() {
+  const lines = await cmd('params', { quiet: true, timeout: 4000 });
+  S.params.clear(); S.order = [];
+  for (const l of lines) {
+    const p = FC.parseParam(l);
+    if (p) { S.params.set(p.name, p); S.order.push(p.name); }
+  }
+  if (!S.params.size) throw new Error('Keine Einstellungen erhalten.');
+}
+const pval = name => (S.dirty.has(name) ? S.dirty.get(name) : S.params.get(name)?.value);
+
+function setDirty(name, value) {
+  const p = S.params.get(name);
+  if (!p) return;
+  if (Math.abs(value - p.value) < 1e-9) S.dirty.delete(name); else S.dirty.set(name, value);
+  refreshParamInputs();
+  updateSaveBar();
+  if (S.tab === 'pid') drawRates();
+  if (S.tab === 'filters') drawFilter();
+}
+function updateSaveBar() {
+  $('savebar').classList.toggle('show', (S.dirty.size > 0 || S.fcUnsaved) && S.connected);
+  $('saveCount').textContent = S.dirty.size ? `(${S.dirty.size} Wert${S.dirty.size > 1 ? 'e' : ''}: ${[...S.dirty.keys()].slice(0, 4).join(', ')}${S.dirty.size > 4 ? ' …' : ''})`
+    : S.fcUnsaved ? '(im Flightcontroller aktiv, aber noch nicht im Flash gespeichert)' : '';
+}
+/* Wert sofort im Flightcontroller setzen (wirkt live), Speichern spaeter */
+async function setNow(name, value) {
+  const p = S.params.get(name);
+  const r = await cmd(`set ${name} ${FC.formatValue(value, p.decimals)}`);
+  if (firstErr(r)) throw new Error(firstErr(r));
+  S.fcUnsaved = true;
+  await loadParams();
+  S.dirty.delete(name);
+  refreshParamInputs(); updateSaveBar();
+}
+
+async function saveParams() {
+  if (S.tlm?.armed) { toast('Gearmt – Einstellungen nur disarmed.', 'err'); return; }
+  const needReboot = S.dirty.has('rx_uart');
+  try {
+    for (const [name, v] of S.dirty) {
+      const p = S.params.get(name);
+      const lines = await cmd(`set ${name} ${FC.formatValue(v, p.decimals)}`);
+      const e = firstErr(lines);
+      if (e) throw new Error(name + ': ' + e);
+    }
+    const r = await cmd('save', { timeout: 5000 });
+    if (firstErr(r)) throw new Error(firstErr(r));
+    S.dirty.clear(); S.fcUnsaved = false;
+    await loadParams();
+    refreshParamInputs(); updateSaveBar();
+    toast('Gespeichert.', 'ok');
+    if (needReboot && await ask('Neustart nötig', 'Der Empfänger-UART wird erst nach einem Neustart verwendet. Jetzt neu starten?', 'Neu starten')) reboot(false);
+  } catch (e) {
+    toast('Speichern fehlgeschlagen: ' + e.message, 'err');
+    await loadParams().catch(() => {});
+    refreshParamInputs(); updateSaveBar();
+  }
+}
+async function discardParams() {
+  S.dirty.clear();
+  if (S.fcUnsaved && await ask('Auch im Flightcontroller zurücksetzen?', 'Einige Werte sind im Flightcontroller schon aktiv (z. B. ACC-Kalibrierung, Bodentest). Neustart lädt wieder die gespeicherten Werte.', 'Neustart')) { reboot(false); }
+  S.fcUnsaved = false;
+  refreshParamInputs(); updateSaveBar(); drawRates(); drawFilter();
+}
+
+/* Eingabefeld fuer eine Einstellung (Zahl oder Auswahl), bleibt mit S verbunden */
+const inputs = [];
+function paramInput(name, opt = {}) {
+  const kind = selectKind(name);
+  let e;
+  if (kind) {
+    e = el('select', {}, SELECTS[kind].map(([v, t]) => el('option', { value: v }, t)));
+  } else {
+    e = el('input', { type: 'number' });
+  }
+  e.dataset.param = name;
+  if (opt.style) e.style.cssText = opt.style;
+  e.addEventListener('change', () => {
+    const p = S.params.get(name);
+    if (!p) return;
+    let v = Number(e.value);
+    if (!Number.isFinite(v)) { refreshParamInputs(); return; }
+    v = Math.min(p.max, Math.max(p.min, v));
+    v = Number(v.toFixed(p.decimals));
+    setDirty(name, v);
+  });
+  inputs.push(e);
+  refreshInput(e);
+  return e;
+}
+function refreshInput(e) {
+  const name = e.dataset.param, p = S.params.get(name);
+  if (!p) { e.disabled = true; e.value = ''; return; }
+  e.disabled = !S.connected;
+  const v = pval(name);
+  if (e.tagName === 'INPUT') {
+    e.min = p.min; e.max = p.max; e.step = p.decimals ? Math.pow(10, -p.decimals) : 1;
+    if (document.activeElement !== e) e.value = FC.formatValue(v, p.decimals);
+  } else e.value = String(v);
+  e.classList.toggle('changed', S.dirty.has(name));
+  e.classList.toggle('nondef', Math.abs(v - p.def) > 1e-9);
+  e.title = `${name}: Standard ${FC.formatValue(p.def, p.decimals)}, Bereich ${p.min} … ${p.max}`;
+}
+function refreshParamInputs() {
+  for (let i = inputs.length - 1; i >= 0; i--) {
+    if (!inputs[i].isConnected) { inputs.splice(i, 1); continue; }
+    refreshInput(inputs[i]);
+  }
+}
+function fieldRow(name, label, small) {
+  return el('div', { class: 'field' }, el('label', {}, label || PINFO[name] || name, small ? el('small', {}, small) : el('small', { class: 'mono' }, name)), paramInput(name));
+}
+
+function buildParamUIs() {
+  /* PID */
+  const pb = $('pidBody'); pb.innerHTML = '';
+  AX.forEach((a, i) => pb.append(el('tr', {}, el('td', {}, AXDE[i]),
+    ...['p', 'i', 'd', 'f'].map(k => el('td', {}, paramInput(`${k}_${a}`))))));
+  const pe = $('pidExtra'); pe.innerHTML = '';
+  pe.append(fieldRow('iterm_relax'), fieldRow('iterm_relax_cutoff'), fieldRow('tpa_rate'), fieldRow('tpa_breakpoint'),
+    fieldRow('airmode_start'), fieldRow('iterm_windup'), fieldRow('iterm_mix_windup'), fieldRow('motor_idle'));
+  const rb = $('rateBody'); rb.innerHTML = '';
+  AX.forEach((a, i) => rb.append(el('tr', {}, el('td', {}, AXDE[i]),
+    ...['center', 'max', 'expo'].map(k => el('td', {}, paramInput(`${a}_${k}`))))));
+  const ae = $('angleExtra'); ae.innerHTML = '';
+  ae.append(fieldRow('angle_limit', 'Angle-Mode: max. Neigung [°]'), fieldRow('angle_p', 'Angle-Mode: Verstärkung'),
+    fieldRow('rc_smoothing_hz'));
+  /* Filter */
+  const fg = $('filtGyro'); fg.innerHTML = '';
+  fg.append(fieldRow('gyro_lpf1_type'), fieldRow('gyro_lpf1_hz'), fieldRow('gyro_lpf2_type'), fieldRow('gyro_lpf2_hz'),
+    fieldRow('gyro_notch_hz'), fieldRow('gyro_notch_cutoff'), fieldRow('acc_lpf_hz'));
+  const fd = $('filtD'); fd.innerHTML = '';
+  fd.append(fieldRow('dterm_lpf1_type'), fieldRow('dterm_lpf1_hz'), fieldRow('dterm_lpf2_type'), fieldRow('dterm_lpf2_hz'),
+    fieldRow('yaw_lowpass_hz'), fieldRow('ff_smoothing_hz'), fieldRow('imu_kp'));
+  /* Empfaenger */
+  for (const n of ['rx_uart', 'crsf_telemetry', 'deadband']) { const h = $('f_' + n); h.innerHTML = ''; h.append(paramInput(n)); }
+  buildParamTable();
+  buildSliders();
+  drawRates(); drawFilter();
+}
+
+function buildParamTable() {
+  const tb = $('paramBody'); tb.innerHTML = '';
+  const q = $('paramFilter').value.trim().toLowerCase();
+  const only = $('onlyDiff').checked;
+  for (const name of S.order) {
+    const p = S.params.get(name);
+    const desc = PINFO[name] || '';
+    if (q && !name.includes(q) && !desc.toLowerCase().includes(q)) continue;
+    if (only && Math.abs(pval(name) - p.def) < 1e-9) continue;
+    tb.append(el('tr', {}, el('td', { class: 'mono' }, name), el('td', {}, paramInput(name)),
+      el('td', { class: 'muted mono' }, FC.formatValue(p.def, p.decimals)),
+      el('td', { class: 'muted mono', style: 'font-size:12px' }, `${+p.min} … ${+p.max}`),
+      el('td', { class: 'muted', style: 'font-size:12.5px' }, desc)));
+  }
+}
+
+function exportDiff() {
+  const lines = ['# diy_drone Einstellungen (diff), ' + new Date().toLocaleString('de-CH'), '# Firmware ' + (S.version?.fw || '?')];
+  for (const name of S.order) {
+    const p = S.params.get(name), v = pval(name);
+    if (Math.abs(v - p.def) > 1e-9) lines.push(`set ${name} ${FC.formatValue(v, p.decimals)}`);
+  }
+  download(`diy_drone_diff_${dateStamp()}.txt`, lines.join('\n') + '\n');
+}
+async function importDiff(file) {
+  const text = await file.text();
+  let n = 0, bad = [];
+  const wanted = new Map();
+  for (const raw of text.split(/\r?\n/)) {
+    const m = /^\s*set\s+([a-z0-9_]+)\s*=?\s*(-?[0-9.]+)/.exec(raw);
+    if (!m) continue;
+    const p = S.params.get(m[1]);
+    if (!p) { bad.push(m[1]); continue; }
+    wanted.set(m[1], Number(m[2]));
+  }
+  const ok = await ask('Einstellungen laden', `Alle Werte zuerst auf Standard, dann ${wanted.size} Werte aus der Datei übernehmen?` + (bad.length ? `<br><br>Unbekannt (ignoriert): ${bad.join(', ')}` : '') + '<br><br>Danach <b>Speichern</b> drücken.', 'Übernehmen');
+  if (!ok) return;
+  for (const name of S.order) {
+    const p = S.params.get(name);
+    const v = wanted.has(name) ? Math.min(p.max, Math.max(p.min, wanted.get(name))) : p.def;
+    if (Math.abs(v - p.value) > 1e-9) { S.dirty.set(name, v); n++; } else S.dirty.delete(name);
+  }
+  refreshParamInputs(); updateSaveBar(); buildParamTable();
+  toast(`${n} Änderungen vorgemerkt – Speichern nicht vergessen.`);
+}
+async function setDefaults() {
+  if (!await ask('Alles auf Standard?', 'Alle Einstellungen (auch Vorzeichen, Kalibrierung und Motor-Zuordnung aus dem Bodentest) auf Standard setzen. Vorher «Sichern» empfohlen.', 'Auf Standard')) return;
+  for (const name of S.order) {
+    const p = S.params.get(name);
+    if (Math.abs(p.def - p.value) > 1e-9) S.dirty.set(name, p.def); else S.dirty.delete(name);
+  }
+  refreshParamInputs(); updateSaveBar(); buildParamTable();
+  toast('Vorgemerkt – mit «Speichern» übernehmen.');
+}
+
+/* =====================================================================
+ * Info, Kalibrierung, Neustart
+ * ===================================================================== */
+async function refreshInfo() {
+  const lines = await cmd('info', { quiet: true, timeout: 3000 });
+  S.info = FC.parseInfo(lines);
+  renderInfo();
+}
+function renderInfo() {
+  const i = S.info, v = S.version || {};
+  const kv = $('sysInfo'); kv.innerHTML = '';
+  const add = (k, val, cls) => kv.append(el('div', { class: 'k' }, k), el('div', { class: cls || '' }, val));
+  add('Board', S.demo ? 'Demo (simuliert)' : (v.board || '–'));
+  add('Firmware', el('span', { class: 'mono' }, v.fw || '–'));
+  add('Takt', i.clock || '–', /HSI/.test(i.clock || '') ? 'chip err' : '');
+  add('Einstellungen', i.config || '–');
+  add('Flash', i.flash_ok ? `${(i.flash_used / 1e6).toFixed(2)} / ${(i.flash_capacity / 1e6).toFixed(1)} MB (${i.flash_percent} %)` : 'nicht gefunden');
+  add('Regelschleife', i.loop_avg_us !== undefined ? `${i.loop_avg_us} µs Rechenzeit (max ${i.loop_max_us}), Periode ${i.loop_min ?? '–'}…${i.loop_max ?? '–'} µs` : '–');
+  add('Empfänger', i.rx_uart ? `UART ${i.rx_uart}, ${i.rx_frames} Pakete, ${i.rx_crc_errors} CRC-Fehler` : 'noch nicht gefunden');
+  add('Überläufe', i.state_loop_overruns ?? '–');
+  /* Flugdaten-Tab */
+  const used = i.flash_used || 0, cap = i.flash_capacity || 1;
+  $('flashBar').style.width = Math.min(100, used * 100 / cap) + '%';
+  const fi = $('flashInfo'); fi.innerHTML = '';
+  const a2 = (k, val) => fi.append(el('div', { class: 'k' }, k), el('div', {}, val));
+  a2('Belegt', `${(used / 1e6).toFixed(2)} MB von ${(cap / 1e6).toFixed(1)} MB (${i.flash_percent ?? 0} %)`);
+  a2('Flugzeit', `ca. ${(used / 32 / 1000).toFixed(0)} s aufgezeichnet, Platz für ${((cap - used) / 32 / 1000 / 60).toFixed(1)} min`);
+  a2('Datensätze', `${i.log_records ?? 0} geschrieben, ${i.log_dropped ?? 0} verworfen`);
+  a2('Chip', i.flash_jedec ? 'JEDEC ' + i.flash_jedec : '–');
+}
+async function calibrate(kind) {
+  if (S.tlm?.armed) return;
+  const b = kind === 'acc' ? $('btnAccCal') : $('btnGyroCal');
+  b.disabled = true;
+  $('calInfo').textContent = kind === 'acc' ? 'ACC: still und waagrecht …' : 'Gyro: still halten …';
+  try {
+    const lines = await cmd(kind === 'acc' ? 'acccal' : 'gyrocal', { timeout: 6000 });
+    const e = firstErr(lines);
+    if (e) throw new Error(e);
+    if (kind === 'acc') {
+      await loadParams(); refreshParamInputs();
+      /* Firmware hat die neuen acc_bias uebernommen (wirkt sofort), dauerhaft erst mit save */
+      $('calInfo').textContent = 'ACC kalibriert – Speichern nicht vergessen';
+      S.fcUnsaved = true; updateSaveBar();
+    } else $('calInfo').textContent = 'Gyro kalibriert ✓';
+  } catch (e) { $('calInfo').textContent = ''; toast('Kalibrierung: ' + e.message, 'err'); }
+  b.disabled = false;
+}
+async function reboot(dfu) {
+  if (S.tlm?.armed) return;
+  if (dfu && !await ask('Bootloader starten?', 'Der Flightcontroller startet im DFU-Modus neu (USB trennt sich). Danach mit dem Betaflight Configurator («Load Firmware [Local]») oder <span class="mono">dfu-util</span> flashen. Aus dem DFU-Modus kommt er durch Aus- und Einstecken.', 'Bootloader')) return;
+  try { await cmd(dfu ? 'dfu' : 'reboot', { timeout: 1500 }); } catch (e) { /* trennt sich */ }
+  await disconnect(true);
+  toast(dfu ? 'Bootloader gestartet. Jetzt flashen.' : 'Neustart … in ein paar Sekunden neu verbinden.');
+}
+
+/* =====================================================================
+ * Live-Daten
+ * ===================================================================== */
+const charts = {};
+let rafPending = false;
+function onTelemetry(t) {
+  S.tlm = t; S.tlmCount++;
+  if (!S.paused) {
+    charts.gyro?.push([t.gyro_r, t.gyro_p, t.gyro_y]);
+    charts.spr?.push([t.sp_r, t.gyro_r]);
+    charts.acc?.push([t.acc_x, t.acc_y, t.acc_z]);
+    charts.att?.push([t.att_r, t.att_p]);
+  }
+  groundTestFeed(t);
+  if (!rafPending) { rafPending = true; requestAnimationFrame(render); }
+}
+setInterval(() => { S.tlmRate = S.tlmCount; S.tlmCount = 0; renderFooter(); renderChips(); }, 1000);
+
+function render() {
+  rafPending = false;
+  renderChips();
+  const t = S.tlm;
+  if (!t) return;
+  switch (S.tab) {
+    case 'setup': renderSetup(t); break;
+    case 'receiver': renderReceiver(t); break;
+    case 'motors': renderMotors(t); break;
+    case 'pid': $('rateNow').textContent = `jetzt: ${t.sp_r.toFixed(0)} / ${t.sp_p.toFixed(0)} / ${t.sp_y.toFixed(0)} °/s`; break;
+    case 'sensors': for (const c of Object.values(charts)) c.draw(); break;
+    case 'groundtest': renderSteps(); break;
+  }
+}
+
+function cellsOf(v) { if (v < 5) return 0; return Math.max(2, Math.min(6, Math.ceil(v / 4.3))); }
+
+function renderChips() {
+  const c = $('chips'); c.innerHTML = '';
+  const chip = (text, cls, title) => c.append(el('span', { class: 'chip ' + (cls || ''), title: title || '' }, text));
+  if (!S.connected) { chip('nicht verbunden'); return; }
+  if (S.demo) chip('DEMO', 'warn');
+  const t = S.tlm;
+  if (!t || S.tlmRate === 0) { chip('keine Live-Daten', 'warn'); if (!t) return; }
+  chip(t.armed ? 'ARMED' : 'DISARMED', t.armed ? 'armed' : 'ok');
+  chip(t.angle_mode ? 'ANGLE' : 'ACRO');
+  if (t.failsafe) chip('FAILSAFE', 'err', 'Keine CRSF-Pakete');
+  if (t.armed && t.airmode) chip('AIRMODE', 'ok');
+  if (t.motor_test) chip('MOTORTEST', 'err');
+  const cells = cellsOf(t.vbat);
+  if (cells) {
+    const per = t.vbat / cells;
+    chip(`${t.vbat.toFixed(2)} V · ${cells}S`, per < (pval('vbat_warn_cell') || 3.5) ? 'err' : per < 3.7 ? 'warn' : 'ok', `${per.toFixed(2)} V pro Zelle`);
+  } else chip('kein Akku', '', 'nur USB');
+  chip(t.rx_uart ? `RX UART${t.rx_uart} · LQ ${t.lq}%` : 'RX: suche …', t.rx_uart ? (t.lq < 70 ? 'warn' : 'ok') : 'warn');
+  if (t.arm_block & 512) chip('GYRO FEHLT', 'err');
+}
+function renderFooter() {
+  $('fStatus').textContent = S.connected ? (S.demo ? 'Demo verbunden' : 'Verbunden') : 'Nicht verbunden';
+  $('fFw').textContent = S.version ? 'Firmware ' + S.version.fw : '';
+  $('fRate').textContent = S.connected ? `${S.tlmRate} Pakete/s` : '';
+  $('fLoop').textContent = S.tlm ? `Regelschleife ${S.tlm.loop_avg_us.toFixed(1)} µs (max ${S.tlm.loop_max_us})` : '';
+}
+
+/* ---------- Uebersicht: 3D-Modell ---------- */
+function renderSetup(t) {
+  const yaw = wrap180(t.att_y - S.yawZero);
+  $('attR').textContent = t.att_r.toFixed(1);
+  $('attP').textContent = t.att_p.toFixed(1);
+  $('attY').textContent = yaw.toFixed(1);
+  draw3d($('cv3d'), t.att_r, t.att_p, yaw);
+  const st = $('armState'), list = $('armList');
+  const blocks = FC.armBlockList(t.arm_block);
+  list.innerHTML = '';
+  if (t.armed) { st.textContent = 'ARMED – Motoren aktiv'; st.className = 'bigstate armed'; }
+  else if (!blocks.length) { st.textContent = 'Bereit zum Armen'; st.className = 'bigstate ok'; }
+  else { st.textContent = 'Armen gesperrt'; st.className = 'bigstate err'; }
+  for (const b of FC.ARM_BLOCKS) {
+    const on = (t.arm_block & b.bit) !== 0;
+    if (!on && ['USB', 'ACC_CAL', 'MOTOR_TEST', 'MOTOR_MAP', 'GYRO_FAIL'].includes(b.key)) continue;
+    list.append(el('li', {}, el('span', { class: 'dot' + (on ? ' err' : '') }),
+      el('div', {}, el('div', {}, on ? b.text : okText(b.key)), on ? el('div', { class: 'hint' }, b.hint) : null)));
+  }
+}
+function okText(key) {
+  return { NO_RX: 'Empfänger verbunden', SWITCH: 'Arm-Schalter bereit', GYRO_CAL: 'Gyro kalibriert', ANGLE: 'Lage flach genug', THROTTLE: 'Gas unten' }[key] || key;
+}
+const wrap180 = a => { a = ((a + 180) % 360 + 360) % 360 - 180; return a; };
+
+function fitCanvas(cv) {
+  const dpr = window.devicePixelRatio || 1;
+  const w = cv.clientWidth, h = Number(cv.getAttribute('height'));
+  if (cv.width !== Math.round(w * dpr) || cv.height !== Math.round(h * dpr)) {
+    cv.width = Math.round(w * dpr); cv.height = Math.round(h * dpr); cv.style.height = h + 'px';
+  }
+  const g = cv.getContext('2d');
+  g.setTransform(dpr, 0, 0, dpr, 0, 0);
+  return { g, w, h };
+}
+
+/* Koerper: x vorne, y rechts, z unten. Firmware: Roll + = rechte Seite runter, Pitch + = Nase runter,
+   Yaw + = gegen den Uhrzeigersinn (von oben). */
+function rotMatrix(rollDeg, pitchDeg, yawDeg) {
+  const r = rollDeg * Math.PI / 180, p = -pitchDeg * Math.PI / 180, y = -yawDeg * Math.PI / 180;
+  const cr = Math.cos(r), sr = Math.sin(r), cp = Math.cos(p), sp = Math.sin(p), cy = Math.cos(y), sy = Math.sin(y);
+  return [
+    [cy * cp, cy * sp * sr - sy * cr, cy * sp * cr + sy * sr],
+    [sy * cp, sy * sp * sr + cy * cr, sy * sp * cr - cy * sr],
+    [-sp, cp * sr, cp * cr],
+  ];
+}
+function draw3d(cv, roll, pitch, yaw) {
+  const { g, w, h } = fitCanvas(cv);
+  g.clearRect(0, 0, w, h);
+  const R = rotMatrix(roll, pitch, yaw);
+  const tf = v => [R[0][0] * v[0] + R[0][1] * v[1] + R[0][2] * v[2], R[1][0] * v[0] + R[1][1] * v[1] + R[1][2] * v[2], R[2][0] * v[0] + R[2][1] * v[1] + R[2][2] * v[2]];
+  /* Kamera hinten oben: Welt (N, E, D) -> Bild */
+  const el_ = 28 * Math.PI / 180, dist = 5.2, f = Math.min(w, h) * 1.25;
+  const proj = q => {
+    const xc = q[1];
+    const yc = q[2] * Math.cos(el_) - q[0] * Math.sin(el_);
+    const zc = q[0] * Math.cos(el_) + q[2] * Math.sin(el_) + dist;
+    return [w / 2 + f * xc / zc, h / 2 + 10 + f * yc / zc, zc];
+  };
+  /* Boden-Gitter */
+  g.strokeStyle = '#2e3138'; g.lineWidth = 1;
+  for (let i = -3; i <= 3; i++) {
+    const a = proj([i * 0.6, -1.8, 0.9]), b = proj([i * 0.6, 1.8, 0.9]);
+    const c = proj([-1.8, i * 0.6, 0.9]), d = proj([1.8, i * 0.6, 0.9]);
+    g.beginPath(); g.moveTo(a[0], a[1]); g.lineTo(b[0], b[1]); g.moveTo(c[0], c[1]); g.lineTo(d[0], d[1]); g.stroke();
+  }
+  const L = 1.0;
+  const rev = pval('yaw_motors_reversed') >= 0.5;
+  /* M1 hinten rechts, M2 vorne rechts, M3 hinten links, M4 vorne links */
+  const motors = [[-L, L, 1, 'M1'], [L, L, 0, 'M2'], [-L, -L, 0, 'M3'], [L, -L, 1, 'M4']];
+  const items = [];
+  const bodyPts = [[0.42, 0.22, 0], [0.42, -0.22, 0], [-0.42, -0.22, 0], [-0.42, 0.22, 0]].map(tf);
+  const topPts = [[0.3, 0.17, -0.16], [0.3, -0.17, -0.16], [-0.3, -0.17, -0.16], [-0.3, 0.17, -0.16]].map(tf);
+  items.push({ z: bodyPts.reduce((s, p) => s + proj(p)[2], 0) / 4 + 0.01, draw: () => poly(bodyPts, '#3b3f47', '#5b606b') });
+  items.push({ z: topPts.reduce((s, p) => s + proj(p)[2], 0) / 4 - 0.02, draw: () => poly(topPts, '#4a3d14', '#ffbb00') });
+  for (const [x, y, cw0, name] of motors) {
+    const cw = rev ? 1 - cw0 : cw0;
+    const c = tf([x, y, 0]);
+    const ring = [];
+    for (let k = 0; k < 24; k++) { const a = k / 24 * Math.PI * 2; ring.push(tf([x + 0.42 * Math.cos(a), y + 0.42 * Math.sin(a), -0.05])); }
+    const hub = tf([x, y, -0.05]);
+    items.push({ z: proj(hub)[2] - 0.05, draw: () => {
+      poly(ring, cw ? 'rgba(58,142,234,.22)' : 'rgba(240,124,42,.22)', cw ? '#3a8eea' : '#f07c2a');
+      const ph = proj(hub);
+      g.fillStyle = '#ddd'; g.font = 'bold 12px system-ui'; g.textAlign = 'center'; g.fillText(name, ph[0], ph[1] + 4);
+    } });
+    items.push({ z: (proj(c)[2] + proj(tf([0, 0, 0]))[2]) / 2 + 0.05, draw: () => {
+      const a = proj(tf([0, 0, 0])), b = proj(c);
+      g.strokeStyle = '#8b919c'; g.lineWidth = 7; g.lineCap = 'round';
+      g.beginPath(); g.moveTo(a[0], a[1]); g.lineTo(b[0], b[1]); g.stroke();
+    } });
+  }
+  /* Pfeil vorne */
+  const arrow = [[1.05, 0, -0.18], [0.55, 0.18, -0.18], [0.55, -0.18, -0.18]].map(tf);
+  items.push({ z: -99, draw: () => poly(arrow, '#e5453b', '#ff8a80') });
+  items.sort((a, b) => b.z - a.z);
+  for (const it of items) it.draw();
+  function poly(pts, fill, stroke) {
+    g.beginPath();
+    pts.forEach((p, i) => { const q = proj(p); if (i) g.lineTo(q[0], q[1]); else g.moveTo(q[0], q[1]); });
+    g.closePath(); g.fillStyle = fill; g.fill(); g.strokeStyle = stroke; g.lineWidth = 1.5; g.stroke();
+  }
+  g.fillStyle = '#9aa0aa'; g.font = '12px system-ui'; g.textAlign = 'left';
+  g.fillText('vorne = roter Pfeil', 8, h - 8);
+}
+
+/* ---------- Empfaenger ---------- */
+const CH_NAMES = ['1 Roll', '2 Pitch', '3 Gas', '4 Yaw', '5 Arm', '6 Angle', '7 AUX 3', '8 AUX 4'];
+function buildChBars() {
+  const box = $('chBars'); box.innerHTML = '';
+  CH_NAMES.forEach((n, i) => box.append(el('div', { class: 'chrow' }, el('div', {}, n),
+    el('div', { class: 'bar' }, el('div', { class: 'fill', id: 'chf' + i }), el('div', { class: 'mid' }), el('div', { class: 'val mono', id: 'chv' + i }, '–')))));
+}
+function renderReceiver(t) {
+  t.ch.forEach((v, i) => {
+    const us = FC.crsfToUs(v);
+    $('chf' + i).style.width = Math.max(0, Math.min(100, (us - 988) / (2012 - 988) * 100)) + '%';
+    $('chv' + i).textContent = t.failsafe ? '–' : us;
+  });
+  $('spR').textContent = t.sp_r.toFixed(0); $('spP').textContent = t.sp_p.toFixed(0); $('spY').textContent = t.sp_y.toFixed(0);
+  const kv = $('rxInfo'); kv.innerHTML = '';
+  const add = (k, v) => kv.append(el('div', { class: 'k' }, k), el('div', {}, v));
+  add('Status', t.failsafe ? el('span', { style: 'color:var(--err)' }, 'Failsafe – keine Pakete') : el('span', { style: 'color:var(--ok)' }, 'Pakete kommen an'));
+  add('UART', t.rx_uart ? `UART ${t.rx_uart}` + (pval('rx_uart') ? ' (fest)' : ' (automatisch gefunden)') : 'noch keiner gefunden (sucht 1, 2, 3, 4, 6)');
+  add('Link-Qualität', t.lq + ' %');
+  add('Pakete', `${t.rx_frames} gültig, ${t.rx_crc_err} CRC-Fehler`);
+  add('Modus', (t.angle_mode ? 'Angle' : 'Rate/Acro') + ' (Kanal 6)');
+  drawSticks($('cvSticks'), t);
+}
+function drawSticks(cv, t) {
+  const { g, w, h } = fitCanvas(cv);
+  g.clearRect(0, 0, w, h);
+  const s = Math.min(h - 26, w / 2 - 30);
+  const boxes = [[w / 2 - s - 15, (h - s) / 2 - 6, FC.crsfToBipolar(t.ch[3]), FC.crsfToUnipolar(t.ch[2]) * 2 - 1, 'Yaw / Gas'],
+    [w / 2 + 15, (h - s) / 2 - 6, FC.crsfToBipolar(t.ch[0]), FC.crsfToBipolar(t.ch[1]), 'Roll / Pitch']];
+  for (const [x, y, sx, sy, lab] of boxes) {
+    g.strokeStyle = '#444a54'; g.lineWidth = 1; g.strokeRect(x, y, s, s);
+    g.beginPath(); g.moveTo(x + s / 2, y); g.lineTo(x + s / 2, y + s); g.moveTo(x, y + s / 2); g.lineTo(x + s, y + s / 2); g.strokeStyle = '#30343b'; g.stroke();
+    g.fillStyle = t.failsafe ? '#666' : '#ffbb00';
+    g.beginPath(); g.arc(x + s / 2 + sx * s / 2, y + s / 2 - sy * s / 2, 8, 0, Math.PI * 2); g.fill();
+    g.fillStyle = '#9aa0aa'; g.font = '11px system-ui'; g.textAlign = 'center'; g.fillText(lab, x + s / 2, y + s + 13);
+  }
+}
+
+/* ---------- Motoren ---------- */
+const motorUI = { values: [0, 0, 0, 0], master: 0, timer: null, wizard: null };
+function buildSliders() {
+  const box = $('sliders'); box.innerHTML = '';
+  const names = ['M1', 'M2', 'M3', 'M4', 'Alle'];
+  names.forEach((n, i) => {
+    const r = el('input', { type: 'range', min: 0, max: 40, step: 1, value: 0, id: 'sl' + i });
+    r.addEventListener('input', () => {
+      const v = Number(r.value);
+      if (i === 4) { motorUI.values = [v, v, v, v]; for (let k = 0; k < 4; k++) $('sl' + k).value = v; }
+      else motorUI.values[i] = v;
+      motorsKick();
+    });
+    box.append(el('div', { class: 'slider' }, el('div', { class: 'lab' }, n), r, el('div', { class: 'num mono', id: 'sln' + i }, '0 %')));
+  });
+  updateMotorEnable();
+}
+function updateMotorEnable() {
+  const ok = S.connected && $('propsOff').checked && !(S.tlm && S.tlm.armed);
+  for (let i = 0; i < 5; i++) { const s = $('sl' + i); if (s) s.disabled = !ok; }
+  $('btnMapStart').disabled = !ok;
+  if (!ok) motorsStop();
+}
+function motorsKick() {
+  for (let i = 0; i < 4; i++) $('sln' + i).textContent = motorUI.values[i] + ' %';
+  $('sln4').textContent = '';
+  const any = motorUI.values.some(v => v > 0);
+  if (any && !motorUI.timer) {
+    motorUI.timer = setInterval(sendMotors, MOTOR_KEEPALIVE_MS);
+    sendMotors();
+  } else if (!any) motorsStop();
+  else sendMotors();
+}
+let motorSending = false;
+function sendMotors() {
+  if (!S.connected || motorSending) return;
+  if (S.tlm?.armed) { motorsStop(); return; }
+  motorSending = true;
+  cmd(`motors ${motorUI.values.join(' ')} ${MOTOR_TIMEOUT_MS}`, { quiet: true, timeout: 1500 })
+    .catch(() => {}).finally(() => { motorSending = false; });
+}
+function motorsStop(silentNoSend) {
+  const was = motorUI.timer || motorUI.values.some(v => v > 0) || motorUI.wizard;
+  clearInterval(motorUI.timer); motorUI.timer = null;
+  motorUI.values = [0, 0, 0, 0];
+  for (let i = 0; i < 5; i++) { const s = $('sl' + i); if (s) s.value = 0; const n = $('sln' + i); if (n) n.textContent = i < 4 ? '0 %' : ''; }
+  if (motorUI.wizard) { motorUI.wizard.cancel = true; }
+  if (was && !silentNoSend && S.connected) cmd('motor stop', { quiet: true }).catch(() => {});
+}
+function renderMotors(t) {
+  updateMotorEnable();
+  drawQuad($('cvQuad'), t);
+  const kv = $('motorInfo'); kv.innerHTML = '';
+  const add = (k, v) => kv.append(el('div', { class: 'k' }, k), el('div', { class: 'mono' }, v));
+  add('DShot M1…M4', t.motors.join('  '));
+  add('Ausgänge 1…4', t.outputs.join('  '));
+  add('Zuordnung', [1, 2, 3, 4].map(i => `M${i}→${pval('motor' + i + '_out')}`).join('  '));
+  add('Akku', cellsOf(t.vbat) ? t.vbat.toFixed(2) + ' V' : el('span', { style: 'color:var(--warn)' }, 'kein Akku – Motoren drehen nur mit Akku'));
+}
+const QUAD_POS = [[0.72, 0.75], [0.72, 0.25], [0.28, 0.75], [0.28, 0.25]];   /* M1..M4: x, y (0..1), oben = vorne */
+function drawQuad(cv, t, highlightPos) {
+  const { g, w, h } = fitCanvas(cv);
+  g.clearRect(0, 0, w, h);
+  const s = Math.min(w, h) * 0.95, ox = (w - s) / 2, oy = (h - s) / 2;
+  const P = i => [ox + QUAD_POS[i][0] * s, oy + QUAD_POS[i][1] * s];
+  const rev = pval('yaw_motors_reversed') >= 0.5;
+  const cwOf = i => ((i === 0 || i === 3) ? !rev : rev);
+  g.strokeStyle = '#7d838e'; g.lineWidth = 9; g.lineCap = 'round';
+  g.beginPath(); g.moveTo(...P(0)); g.lineTo(...P(3)); g.moveTo(...P(1)); g.lineTo(...P(2)); g.stroke();
+  g.fillStyle = '#3b3f47'; g.fillRect(ox + s * 0.4, oy + s * 0.36, s * 0.2, s * 0.28);
+  g.fillStyle = '#e5453b'; g.beginPath(); g.moveTo(ox + s / 2, oy + s * 0.31); g.lineTo(ox + s * 0.46, oy + s * 0.38); g.lineTo(ox + s * 0.54, oy + s * 0.38); g.fill();
+  for (let i = 0; i < 4; i++) {
+    const [x, y] = P(i), r = s * 0.16, cw = cwOf(i);
+    const val = t ? t.motors[i] : 0;
+    const spin = val > 0 ? (val - 48) / 1999 : 0;
+    g.fillStyle = '#23252a'; g.beginPath(); g.arc(x, y, r, 0, Math.PI * 2); g.fill();
+    g.fillStyle = cw ? 'rgba(58,142,234,.18)' : 'rgba(240,124,42,.18)';
+    if (highlightPos === i) g.fillStyle = 'rgba(255,187,0,.35)';
+    g.beginPath(); g.arc(x, y, r, 0, Math.PI * 2); g.fill();
+    g.strokeStyle = cw ? '#3a8eea' : '#f07c2a'; g.lineWidth = 2; g.stroke();
+    /* Drehrichtung: Bogen mit Pfeil */
+    const a0 = -2.2, a1 = 0.2;
+    g.beginPath(); g.arc(x, y, r * 0.75, a0, a1, !cw && false); g.stroke();
+    const ae = cw ? a1 : a0, dir = cw ? 1 : -1;
+    const ex = x + r * 0.75 * Math.cos(ae), ey = y + r * 0.75 * Math.sin(ae);
+    const tx = -Math.sin(ae) * dir, ty = Math.cos(ae) * dir;
+    g.beginPath(); g.moveTo(ex + tx * 9, ey + ty * 9); g.lineTo(ex - ty * 6, ey + tx * 6); g.lineTo(ex + ty * 6, ey - tx * 6); g.closePath();
+    g.fillStyle = cw ? '#3a8eea' : '#f07c2a'; g.fill();
+    if (spin > 0) { g.fillStyle = 'rgba(255,187,0,.7)'; g.beginPath(); g.arc(x, y, r * 0.45 * Math.max(0.2, spin * 2.5), 0, Math.PI * 2); g.fill(); }
+    g.fillStyle = '#fff'; g.font = 'bold 14px system-ui'; g.textAlign = 'center'; g.fillText('M' + (i + 1), x, y + 5);
+    g.fillStyle = '#9aa0aa'; g.font = '11px system-ui';
+    g.fillText(`Ausgang ${pval('motor' + (i + 1) + '_out') ?? '?'}`, x, y + r + 14);
+  }
+  g.fillStyle = '#9aa0aa'; g.font = '12px system-ui'; g.textAlign = 'center'; g.fillText('VORNE', ox + s / 2, oy + s * 0.07);
+  $('propsDirNote').textContent = rev ? ', hier umgekehrt: «Props out»' : '';
+}
+
+/* Assistent Motor-Reihenfolge */
+async function mapWizard() {
+  if (motorUI.wizard) return;
+  motorsStop(true);
+  const box = $('mapWizard');
+  const orig = [1, 2, 3, 4].map(i => pval('motor' + i + '_out'));
+  const w = { cancel: false, result: [0, 0, 0, 0] };
+  motorUI.wizard = w;
+  /* zuerst 1:1-Zuordnung aktiv machen (nur im Speicher, nicht gespeichert) */
+  try {
+    for (let i = 1; i <= 4; i++) { const r = await cmd(`set motor${i}_out ${i}`, { quiet: true }); if (firstErr(r)) throw new Error(firstErr(r)); }
+    const cv = $('cvQuad');
+    for (let out = 1; out <= 4 && !w.cancel; out++) {
+      box.innerHTML = '';
+      box.append(el('div', { class: 'banner warn' }, `Ausgang ${out} dreht (8 %). Klicke im Bild oben links auf die Stelle, an der sich der Motor dreht.`),
+        el('button', { class: 'btn', onclick: () => { w.cancel = true; } }, 'Abbrechen'));
+      const pos = await new Promise(resolve => {
+        const keep = setInterval(() => { if (w.cancel) { clearInterval(keep); resolve(-1); return; }
+          const v = [0, 0, 0, 0]; v[out - 1] = 8; cmd(`motors ${v.join(' ')} ${MOTOR_TIMEOUT_MS}`, { quiet: true }).catch(() => {}); }, MOTOR_KEEPALIVE_MS);
+        const v = [0, 0, 0, 0]; v[out - 1] = 8; cmd(`motors ${v.join(' ')} ${MOTOR_TIMEOUT_MS}`, { quiet: true }).catch(() => {});
+        const onClick = ev => {
+          const rc = cv.getBoundingClientRect(), x = ev.clientX - rc.left, y = ev.clientY - rc.top;
+          const s = Math.min(rc.width, Number(cv.getAttribute('height'))) * 0.95, ox = (rc.width - s) / 2, oy = (Number(cv.getAttribute('height')) - s) / 2;
+          let best = -1, bd = 1e9;
+          QUAD_POS.forEach((q, i) => { const d = Math.hypot(ox + q[0] * s - x, oy + q[1] * s - y); if (d < bd) { bd = d; best = i; } });
+          if (bd < s * 0.25) { cv.removeEventListener('click', onClick); clearInterval(keep); resolve(best); }
+        };
+        cv.addEventListener('click', onClick);
+        w.cleanup = () => { cv.removeEventListener('click', onClick); clearInterval(keep); };
+      });
+      await cmd('motor stop', { quiet: true }).catch(() => {});
+      if (pos < 0) break;
+      w.result[pos] = out;
+      await new Promise(r => setTimeout(r, 400));
+    }
+    w.cleanup && w.cleanup();
+    const valid = new Set(w.result).size === 4 && !w.result.includes(0);
+    /* Firmware wieder auf die bisherigen Werte (bis gespeichert wird) */
+    for (let i = 1; i <= 4; i++) await cmd(`set motor${i}_out ${S.params.get('motor' + i + '_out').value}`, { quiet: true });
+    S.fcUnsaved = true;
+    box.innerHTML = '';
+    if (w.cancel) { box.append(el('div', { class: 'muted' }, 'Abgebrochen.')); }
+    else if (!valid) { box.append(el('div', { class: 'banner err' }, 'Eine Position wurde doppelt gewählt. Bitte nochmals.')); }
+    else {
+      w.result.forEach((o, i) => setDirty('motor' + (i + 1) + '_out', o));
+      const same = w.result.every((o, i) => o === orig[i]);
+      box.append(el('div', { class: same ? 'banner ok' : 'banner info' },
+        same ? 'Reihenfolge stimmt bereits.' : `Neue Zuordnung: ${w.result.map((o, i) => `M${i + 1}→Ausgang ${o}`).join(', ')}. Mit «Speichern» übernehmen.`));
+    }
+  } catch (e) { toast('Assistent: ' + e.message, 'err'); box.innerHTML = ''; }
+  motorUI.wizard = null;
+}
+
+/* ---------- Rates und Filter zeichnen ---------- */
+function axes(g, x0, y0, w, h, xmax, ymax, xlab, ylab, ymin = 0) {
+  g.strokeStyle = '#30343b'; g.lineWidth = 1; g.fillStyle = '#7d838e'; g.font = '11px system-ui';
+  for (let k = 0; k <= 4; k++) {
+    const y = y0 + h - k / 4 * h;
+    g.beginPath(); g.moveTo(x0, y); g.lineTo(x0 + w, y); g.stroke();
+    const v = ymin + (ymax - ymin) * k / 4;
+    g.textAlign = 'right'; g.fillText(ymax - ymin < 10 ? v.toFixed(2) : Math.round(v), x0 - 5, y + 4);
+  }
+  for (let k = 0; k <= 4; k++) {
+    const x = x0 + k / 4 * w;
+    g.textAlign = k === 0 ? 'left' : k === 4 ? 'right' : 'center';
+    g.fillText(xlab(k / 4 * xmax), x, y0 + h + 14);
+  }
+  g.save(); g.translate(10, y0 + h / 2); g.rotate(-Math.PI / 2); g.fillText(ylab, 0, 0); g.restore();
+}
+function drawRates() {
+  const cv = $('cvRates'); if (!cv || !S.params.size || S.tab !== 'pid') return;
+  const { g, w, h } = fitCanvas(cv);
+  g.clearRect(0, 0, w, h);
+  const x0 = 46, y0 = 8, W = w - x0 - 10, H = h - 30;
+  const vals = AX.map(a => [pval(a + '_center'), pval(a + '_max'), pval(a + '_expo')]);
+  const ymax = Math.max(200, ...vals.map(v => Math.max(v[0], v[1]))) * 1.08;
+  axes(g, x0, y0, W, H, 1, ymax, x => x.toFixed(2), '°/s');
+  [COL.r, COL.p, COL.y].forEach((c, i) => {
+    g.strokeStyle = c; g.lineWidth = 2; g.beginPath();
+    for (let k = 0; k <= 100; k++) {
+      const x = k / 100, y = FC.actualRate(x, ...vals[i]);
+      const px = x0 + x * W, py = y0 + H - y / ymax * H;
+      if (k) g.lineTo(px, py); else g.moveTo(px, py);
+    }
+    g.stroke();
+  });
+  g.fillStyle = '#9aa0aa'; g.textAlign = 'right'; g.fillText('Stick-Ausschlag →', x0 + W, y0 + 12);
+}
+function lpfMag(type, fc, f, fs) {
+  if (!type || fc <= 0) return 1;
+  if (type === 1) {                                     /* PT1 (diskret, wie pt1.c) */
+    const dt = 1 / fs, rc = 1 / (2 * Math.PI * fc), k = dt / (rc + dt);
+    const wd = 2 * Math.PI * f / fs;
+    const re = 1 - (1 - k) * Math.cos(wd), im = (1 - k) * Math.sin(wd);
+    return k / Math.hypot(re, im);
+  }
+  /* Biquad-Tiefpass Q = 1/sqrt(2) (Butterworth, bilinear) */
+  const q = Math.SQRT1_2, w0 = 2 * Math.PI * fc / fs, al = Math.sin(w0) / (2 * q), cs = Math.cos(w0);
+  const b0 = (1 - cs) / 2, b1 = 1 - cs, b2 = b0, a0 = 1 + al, a1 = -2 * cs, a2 = 1 - al;
+  return biquadMag([b0 / a0, b1 / a0, b2 / a0], [1, a1 / a0, a2 / a0], f, fs);
+}
+function biquadMag(b, a, f, fs) {
+  const wd = 2 * Math.PI * f / fs;
+  const c1 = Math.cos(wd), s1 = Math.sin(wd), c2 = Math.cos(2 * wd), s2 = Math.sin(2 * wd);
+  const nr = b[0] + b[1] * c1 + b[2] * c2, ni = -(b[1] * s1 + b[2] * s2);
+  const dr = a[0] + a[1] * c1 + a[2] * c2, di = -(a[1] * s1 + a[2] * s2);
+  return Math.hypot(nr, ni) / Math.hypot(dr, di);
+}
+function notchMag(f0, fcut, f, fs) {
+  if (!(f0 > 0 && fcut > 0 && fcut < f0 && f0 < fs / 2)) return 1;
+  const q = f0 * fcut / (f0 * f0 - fcut * fcut);
+  const w0 = 2 * Math.PI * f0 / fs, al = Math.sin(w0) / (2 * q), cs = Math.cos(w0), a0 = 1 + al;
+  return biquadMag([1 / a0, -2 * cs / a0, 1 / a0], [1, -2 * cs / a0, (1 - al) / a0], f, fs);
+}
+function drawFilter() {
+  const cv = $('cvFilter'); if (!cv || !S.params.size || S.tab !== 'filters') return;
+  const { g, w, h } = fitCanvas(cv);
+  g.clearRect(0, 0, w, h);
+  const fs = 1000, x0 = 46, y0 = 8, W = w - x0 - 10, H = h - 30;
+  axes(g, x0, y0, W, H, 500, 1.1, f => f.toFixed(0) + ' Hz', '|H|');
+  g.fillStyle = '#7d838e'; g.textAlign = 'right';
+  const curve = (fn, col) => {
+    g.strokeStyle = col; g.lineWidth = 2; g.beginPath();
+    for (let k = 1; k <= 250; k++) {
+      const f = k * 2, m = fn(f);
+      const px = x0 + f / 500 * W, py = y0 + H - Math.min(1.1, m) / 1.1 * H;
+      if (k > 1) g.lineTo(px, py); else g.moveTo(px, py);
+    }
+    g.stroke();
+  };
+  curve(f => lpfMag(pval('gyro_lpf1_type'), pval('gyro_lpf1_hz'), f, fs) * lpfMag(pval('gyro_lpf2_type'), pval('gyro_lpf2_hz'), f, fs) *
+    notchMag(pval('gyro_notch_hz'), pval('gyro_notch_cutoff'), f, fs), COL.accent);
+  curve(f => lpfMag(pval('dterm_lpf1_type'), pval('dterm_lpf1_hz'), f, fs) * lpfMag(pval('dterm_lpf2_type'), pval('dterm_lpf2_hz'), f, fs), COL.y);
+  const y707 = y0 + H - 0.707 / 1.1 * H;
+  g.setLineDash([4, 4]); g.strokeStyle = '#555'; g.lineWidth = 1; g.beginPath(); g.moveTo(x0, y707); g.lineTo(x0 + W, y707); g.stroke(); g.setLineDash([]);
+  g.fillStyle = '#7d838e'; g.textAlign = 'left'; g.fillText('−3 dB', x0 + 4, y707 - 4);
+}
+
+/* ---------- Live-Diagramme ---------- */
+class Chart {
+  constructor(cv, colors, opt = {}) { this.cv = cv; this.colors = colors; this.n = 400; this.data = []; this.opt = opt; }
+  push(v) { this.data.push(v); if (this.data.length > this.n) this.data.shift(); }
+  draw() {
+    const { g, w, h } = fitCanvas(this.cv);
+    g.clearRect(0, 0, w, h);
+    const x0 = 44, y0 = 6, W = w - x0 - 6, H = h - 22;
+    let lo = Infinity, hi = -Infinity;
+    for (const r of this.data) for (const v of r) { if (v < lo) lo = v; if (v > hi) hi = v; }
+    const minSpan = this.opt.minSpan || 10;
+    if (!(hi > lo)) { lo = -minSpan / 2; hi = minSpan / 2; }
+    if (hi - lo < minSpan) { const m = (hi + lo) / 2; lo = m - minSpan / 2; hi = m + minSpan / 2; }
+    const pad = (hi - lo) * 0.1; lo -= pad; hi += pad;
+    g.strokeStyle = '#30343b'; g.fillStyle = '#7d838e'; g.font = '11px system-ui'; g.textAlign = 'right'; g.lineWidth = 1;
+    for (let k = 0; k <= 4; k++) {
+      const v = lo + (hi - lo) * k / 4, y = y0 + H - k / 4 * H;
+      g.beginPath(); g.moveTo(x0, y); g.lineTo(x0 + W, y); g.stroke();
+      g.fillText(Math.abs(hi - lo) < 5 ? v.toFixed(2) : v.toFixed(0), x0 - 4, y + 4);
+    }
+    if (lo < 0 && hi > 0) { const y = y0 + H - (0 - lo) / (hi - lo) * H; g.strokeStyle = '#555'; g.beginPath(); g.moveTo(x0, y); g.lineTo(x0 + W, y); g.stroke(); }
+    g.textAlign = 'center'; g.fillText(`${(this.n / TLM_HZ).toFixed(0)} s`, x0 + W / 2, h - 4);
+    for (let s = 0; s < this.colors.length; s++) {
+      g.strokeStyle = this.colors[s]; g.lineWidth = 1.6; g.beginPath();
+      this.data.forEach((r, i) => {
+        const x = x0 + (i + this.n - this.data.length) / (this.n - 1) * W, y = y0 + H - (r[s] - lo) / (hi - lo) * H;
+        if (i) g.lineTo(x, y); else g.moveTo(x, y);
+      });
+      g.stroke();
+    }
+  }
+}
+
+/* =====================================================================
+ * Bodentest
+ * ===================================================================== */
+const STEPS = [
+  { id: 'gyro_roll', title: 'Rechte Seite nach unten kippen', desc: 'Drohne zügig um die Längsachse kippen (Roll).', key: 'gyro_r', expect: 1, param: 'gyro_sign_roll', thr: 60, unit: '°/s' },
+  { id: 'gyro_pitch', title: 'Nase nach unten kippen', desc: 'Drohne zügig um die Querachse kippen (Pitch).', key: 'gyro_p', expect: 1, param: 'gyro_sign_pitch', thr: 60, unit: '°/s' },
+  { id: 'gyro_yaw', title: 'Von oben gesehen gegen den Uhrzeigersinn drehen', desc: 'Drohne flach auf dem Tisch nach links drehen (Yaw).', key: 'gyro_y', expect: 1, param: 'gyro_sign_yaw', thr: 60, unit: '°/s' },
+  { id: 'att', title: 'Lage-Anzeige prüfen', desc: 'Rechts runter → Roll positiv, Nase runter → Pitch positiv (Modell im Tab Übersicht kippt gleich mit).', manual: true },
+  { id: 'stick_roll', title: 'Roll-Stick nach rechts', desc: 'Fernsteuerung an. Soll-Drehrate Roll muss positiv werden.', key: 'sp_r', expect: 1, param: 'stick_sign_roll', thr: 150, unit: '°/s', needRx: true },
+  { id: 'stick_pitch', title: 'Pitch-Stick nach vorne', desc: 'Soll-Drehrate Pitch muss positiv werden (Nase runter).', key: 'sp_p', expect: 1, param: 'stick_sign_pitch', thr: 150, unit: '°/s', needRx: true },
+  { id: 'stick_yaw', title: 'Yaw-Stick nach rechts', desc: 'Soll-Drehrate Yaw muss negativ werden (im Uhrzeigersinn).', key: 'sp_y', expect: -1, param: 'stick_sign_yaw', thr: 150, unit: '°/s', needRx: true },
+  { id: 'arm_switch', title: 'Arm-Schalter (Kanal 5) einmal ein und aus', desc: 'Nur Erkennung, armt ohne Akku/Motoren ungefährlich. Erwartet: Kanal 5 > 1700 µs und zurück.', special: 'arm', needRx: true },
+  { id: 'failsafe', title: 'Failsafe: Fernsteuerung ausschalten', desc: 'Die Firmware muss «Failsafe» melden (innerhalb 0.25 s). Danach wieder einschalten.', special: 'fs' },
+  { id: 'acc', title: 'ACC kalibrieren', desc: 'Drohne waagrecht hinstellen (Wasserwaage), dann Knopf drücken.', special: 'acc' },
+];
+const GT = { active: 0, res: {}, peak: 0, seen: {} };
+function buildSteps() {
+  const box = $('steps'); box.innerHTML = '';
+  STEPS.forEach((s, i) => {
+    const right = el('div', { id: 'stR' + i });
+    box.append(el('div', { class: 'step', id: 'st' + i, onclick: () => { if (GT.active !== i) { GT.active = i; GT.peak = 0; renderSteps(); } } },
+      el('div', { class: 'n' }, i + 1), el('div', {}, el('div', { class: 't' }, s.title), el('div', { class: 'd' }, s.desc)), right));
+  });
+  renderSteps();
+}
+function groundTestFeed(t) {
+  if (S.tab !== 'groundtest') return;          /* nur auswerten, wenn der Tab offen ist */
+  const s = STEPS[GT.active];
+  if (!s || GT.res[s.id]) return;
+  if (s.key) {
+    if (s.needRx && t.failsafe) return;
+    const v = t[s.key];
+    if (Math.abs(v) > Math.abs(GT.peak)) GT.peak = v;
+    if (Math.abs(GT.peak) >= s.thr) {
+      const sign = Math.sign(GT.peak);
+      GT.res[s.id] = { ok: sign === s.expect, value: GT.peak, sign };
+      if (GT.res[s.id].ok) nextStep();
+    }
+  } else if (s.special === 'arm') {
+    if (t.failsafe) return;
+    const us = FC.crsfToUs(t.ch[4]);
+    if (us > 1700) GT.seen.armOn = true;
+    if (GT.seen.armOn && us < 1300) { GT.res[s.id] = { ok: true, value: 'erkannt' }; nextStep(); }
+  } else if (s.special === 'fs') {
+    if (t.failsafe) GT.seen.fs = true;
+    if (GT.seen.fs && !t.failsafe) { GT.res[s.id] = { ok: true, value: 'Failsafe erkannt, Verbindung zurück' }; nextStep(); }
+  }
+}
+function nextStep() { setTimeout(() => { if (GT.active < STEPS.length - 1) { GT.active++; GT.peak = 0; } renderSteps(); }, 700); }
+function renderSteps() {
+  const t = S.tlm;
+  STEPS.forEach((s, i) => {
+    const row = $('st' + i); if (!row) return;
+    const r = GT.res[s.id];
+    row.className = 'step' + (i === GT.active ? ' active' : '') + (r ? (r.ok ? ' pass' : ' fail') : '');
+    row.querySelector('.n').textContent = r ? (r.ok ? '✓' : '✗') : i + 1;
+    const right = $('stR' + i);
+    if (right.dataset.state === JSON.stringify([i === GT.active, r, s.key ? null : 0]) && !(i === GT.active && s.key && !r)) return;
+    right.dataset.state = JSON.stringify([i === GT.active, r, s.key ? null : 0]);
+    right.innerHTML = '';
+    if (r && !r.ok && s.param) {
+      const cur = pval(s.param);
+      right.append(el('div', { style: 'color:var(--err);font-size:12.5px' }, `Falsch: ${r.value.toFixed(0)} ${s.unit}`),
+        el('button', { class: 'btn primary', style: 'margin-top:4px', onclick: async ev => { ev.stopPropagation();
+          try { await setNow(s.param, -cur); GT.res[s.id] = { ok: true, value: r.value, fixed: true }; nextStep(); }
+          catch (e) { toast(e.message, 'err'); } } }, `${s.param} = ${-cur > 0 ? '+1' : '−1'}`));
+    } else if (r) {
+      right.append(el('div', { style: 'color:var(--ok);font-size:12.5px' }, r.fixed ? 'korrigiert (Speichern!)' : (typeof r.value === 'number' ? `OK: ${r.value.toFixed(0)} ${s.unit}` : 'OK: ' + r.value)));
+    } else if (i === GT.active) {
+      if (s.manual) right.append(el('button', { class: 'btn primary', onclick: ev => { ev.stopPropagation(); GT.res[s.id] = { ok: true, value: 'bestätigt' }; nextStep(); } }, 'Stimmt'),
+        ' ', el('button', { class: 'btn', onclick: ev => { ev.stopPropagation(); GT.res[s.id] = { ok: false, value: 'stimmt nicht' }; renderSteps(); toast('Zuerst die Gyro-Vorzeichen (Schritte 1–3) prüfen; ohne ACC-Kalibrierung kann die Lage einige Grad abweichen.'); } }, 'Stimmt nicht'));
+      else if (s.special === 'acc') right.append(el('button', { class: 'btn primary', onclick: async ev => { ev.stopPropagation(); await calibrate('acc'); GT.res[s.id] = { ok: true, value: 'kalibriert (Speichern!)' }; renderSteps(); } }, 'ACC kalibrieren'));
+      else if (s.key) {
+        const v = t ? t[s.key] : 0;
+        const wait = s.needRx && t && t.failsafe;
+        right.append(el('div', { class: 'mono', style: 'font-size:12.5px' }, wait ? 'warte auf Fernsteuerung …' : `${(v || 0).toFixed(0)} ${s.unit}`),
+          el('div', { class: 'meter' }, el('div', { class: 'c' }), el('div', { class: 'f', style: meterStyle(v, s.thr * 2) })));
+      } else right.append(el('div', { class: 'muted', style: 'font-size:12.5px' }, t && t.failsafe ? 'Failsafe aktiv …' : 'warte …'));
+    }
+  });
+}
+function meterStyle(v, full) {
+  const x = Math.max(-1, Math.min(1, (v || 0) / full)) * 50;
+  return x >= 0 ? `left:50%;width:${x}%` : `left:${50 + x}%;width:${-x}%`;
+}
+function saveProtocol() {
+  const L = [];
+  L.push('# Bodentest (M0) – Build B', '', `- Datum: ${new Date().toLocaleString('de-CH')}`, `- Firmware: ${S.version?.fw || '?'}${S.demo ? ' (DEMO, keine Hardware!)' : ''}`,
+    `- Empfänger: UART ${S.tlm?.rx_uart || '?'}`, `- Akku: ${S.tlm ? S.tlm.vbat.toFixed(2) + ' V' : '?'}`, '', '| Nr | Prüfung | Ergebnis |', '|---|---|---|');
+  STEPS.forEach((s, i) => {
+    const r = GT.res[s.id];
+    const txt = !r ? 'nicht geprüft' : r.fixed ? `falsch → ${s.param} korrigiert` : r.ok ? 'OK' + (typeof r.value === 'number' ? ` (${r.value.toFixed(0)} ${s.unit})` : '') : 'FEHLER' + (typeof r.value === 'number' ? ` (${r.value.toFixed(0)} ${s.unit})` : ` (${r.value})`);
+    L.push(`| ${i + 1} | ${s.title} | ${txt} |`);
+  });
+  L.push('', '## Einstellungen (diff)', '', '```');
+  for (const name of S.order) { const p = S.params.get(name), v = pval(name); if (Math.abs(v - p.def) > 1e-9) L.push(`set ${name} ${FC.formatValue(v, p.decimals)}${S.dirty.has(name) ? '   # NICHT GESPEICHERT' : ''}`); }
+  L.push('```', '', 'Noch von Hand: Motor-Reihenfolge/Drehrichtung (Tab Motoren), Regelrichtung mit Akku und Gas 20 % in der Hand (docs/bodentest.md, Schritt 4), Logging (Schritt 6).');
+  download(`bodentest_${dateStamp()}.md`, L.join('\n') + '\n');
+}
+
+/* =====================================================================
+ * Flugdaten
+ * ===================================================================== */
+async function dumpLogs() {
+  if (S.tlm?.armed) return;
+  const prefix = $('dumpPrefix').value.trim() || dateStamp();
+  $('dumpProg').style.display = 'block'; $('btnDump').disabled = true; $('btnErase').disabled = true;
+  const t0 = performance.now();
+  splitter.onProgress = (n, total) => {
+    $('dumpBar').style.width = (n * 100 / total) + '%';
+    $('dumpTxt').textContent = `${(n / 1e6).toFixed(2)} / ${(total / 1e6).toFixed(2)} MB · ${(n / 1e3 / ((performance.now() - t0) / 1000)).toFixed(0)} kB/s`;
+  };
+  try {
+    await cmd('stream 0', { quiet: true });
+    const lines = await cmd('dump', { binary: true, quiet: true, timeout: 15 * 60 * 1000 });
+    if (firstErr(lines)) throw new Error(firstErr(lines));
+    const data = S.dumpData || new Uint8Array(0);
+    const res = FC.decodeLog(data);
+    S.flights = res.flights; S.rawLog = data; S.logPrefix = prefix;
+    $('dumpTxt').textContent = `${(data.length / 1e6).toFixed(2)} MB geladen · ${res.flights.length} Flüge · CRC-Fehler ${res.crcErrors}`;
+    $('dumpBar').style.width = '100%';
+    renderFlights();
+    toast(`${res.flights.length} Flug/Flüge heruntergeladen.`, 'ok');
+  } catch (e) { toast('Download: ' + e.message, 'err'); }
+  splitter.onProgress = null;
+  $('btnDump').disabled = false; $('btnErase').disabled = false;
+  if (S.connected) await cmd('stream ' + TLM_HZ, { quiet: true }).catch(() => {});
+  refreshInfo().catch(() => {});
+}
+function renderFlights() {
+  const box = $('flightList'); box.innerHTML = '';
+  if (!S.flights.length) { box.append(el('div', { class: 'muted' }, 'Keine Flüge im Speicher.')); return; }
+  const tb = el('tbody');
+  S.flights.forEach((f, i) => {
+    const name = `${S.logPrefix}_B_${String(f.index).padStart(2, '0')}`;
+    const pid = f.header.pid ? `${f.header.pid.roll.join('/')}` : '–';
+    tb.append(el('tr', {}, el('td', {}, '#' + f.index), el('td', {}, f.duration_s.toFixed(1) + ' s'), el('td', {}, f.samples),
+      el('td', { class: 'mono', style: 'font-size:12px' }, pid),
+      el('td', {}, el('button', { class: 'btn', onclick: () => plotFlight(i) }, 'Anzeigen'), ' ',
+        el('button', { class: 'btn', onclick: () => { download(name + '.csv', FC.flightToCsv(f)); download(name + '.json', JSON.stringify(FC.flightMeta(f), null, 2)); } }, 'CSV'))));
+  });
+  box.append(el('table', {}, el('thead', {}, el('tr', {}, el('th', {}, 'Flug'), el('th', {}, 'Dauer'), el('th', {}, 'Werte'), el('th', {}, 'PID Roll'), el('th', {}, ''))), tb),
+    el('div', { class: 'row', style: 'margin-top:10px' }, el('span', { class: 'sp' }),
+      el('button', { class: 'btn', onclick: () => download(`${S.logPrefix}_B_roh.bin`, S.rawLog) }, 'Rohdaten (.bin)'),
+      el('button', { class: 'btn primary', onclick: async () => { for (const f of S.flights) { const n = `${S.logPrefix}_B_${String(f.index).padStart(2, '0')}`; download(n + '.csv', FC.flightToCsv(f)); download(n + '.json', JSON.stringify(FC.flightMeta(f), null, 2)); await new Promise(r => setTimeout(r, 300)); } } }, 'Alle als CSV')));
+  plotFlight(0);
+}
+function plotFlight(i) {
+  const f = S.flights[i]; if (!f) return;
+  S.plotIdx = i;
+  $('flightPlotPanel').style.display = 'block';
+  $('flightPlotTitle').textContent = `Flug #${f.index} · ${f.duration_s.toFixed(1)} s`;
+  const a = Number($('flightAxis').value);
+  const cv = $('cvFlight');
+  const { g, w, h } = fitCanvas(cv);
+  g.clearRect(0, 0, w, h);
+  const x0 = 50, y0 = 8, W = w - x0 - 40, H = h - 30;
+  const rows = f.rows, n = rows.length, step = Math.max(1, Math.floor(n / W / 2));
+  let hi = 50;
+  for (let k = 0; k < n; k += step) hi = Math.max(hi, Math.abs(rows[k][1 + a]), Math.abs(rows[k][4 + a]));
+  hi *= 1.1;
+  axes(g, x0, y0, W, H, f.duration_s, hi, x => x.toFixed(1) + ' s', '°/s', -hi);
+  const line = (col, fn, scale) => {
+    g.strokeStyle = col; g.lineWidth = 1.3; g.beginPath();
+    for (let k = 0; k < n; k += step) {
+      const px = x0 + k / (n - 1) * W, v = fn(rows[k]), py = scale ? y0 + H - v * H : y0 + H / 2 - v / hi * H / 2;
+      if (k) g.lineTo(px, py); else g.moveTo(px, py);
+    }
+    g.stroke();
+  };
+  line('#888', r => r[7], true);
+  line('#ffffff', r => r[1 + a]);
+  line(COL.accent, r => r[4 + a]);
+}
+async function eraseLogs() {
+  if (S.tlm?.armed) return;
+  if (!await ask('Flugdaten löschen?', 'Alle Flüge im Flash werden gelöscht. <b>Vorher herunterladen!</b>' + (S.flights.length ? '' : '<br><br><span style="color:var(--err)">In dieser Sitzung wurde noch nichts heruntergeladen.</span>'), 'Löschen')) return;
+  $('btnErase').disabled = true; $('dumpProg').style.display = 'block'; $('dumpBar').style.width = '0';
+  try {
+    const lines = await cmd('erase', { timeout: 120000, onLine: l => { const m = /ERASE (\d+)%/.exec(l); if (m) { $('dumpBar').style.width = m[1] + '%'; $('dumpTxt').textContent = 'Lösche … ' + m[1] + ' %'; } } });
+    if (firstErr(lines)) throw new Error(firstErr(lines));
+    $('dumpTxt').textContent = 'Gelöscht.';
+    toast('Flugdaten gelöscht.', 'ok');
+  } catch (e) { toast('Löschen: ' + e.message, 'err'); }
+  $('btnErase').disabled = false;
+  refreshInfo().catch(() => {});
+}
+
+/* =====================================================================
+ * CLI
+ * ===================================================================== */
+const hist = []; let histPos = 0;
+function termLine(text, cls) {
+  const t = $('term');
+  const atEnd = t.scrollTop + t.clientHeight >= t.scrollHeight - 30;
+  t.append(el('span', { class: cls || '' }, text + '\n'));
+  while (t.childNodes.length > 2000) t.removeChild(t.firstChild);
+  if (atEnd) t.scrollTop = t.scrollHeight;
+}
+async function cliSend(text) {
+  text = text.trim(); if (!text) return;
+  hist.push(text); histPos = hist.length;
+  if (!S.connected) { termLine('nicht verbunden', 'err'); return; }
+  if (/^live\b/.test(text)) { termLine('«live» hier nicht nötig: Tab Sensoren / Übersicht zeigt die Live-Daten.', 'sys'); return; }
+  if (/^dump\b/.test(text)) { termLine('Für den Download den Tab «Flugdaten» verwenden.', 'sys'); return; }
+  if (/^(dfu|reboot)\b/.test(text)) { reboot(text.startsWith('dfu')); return; }
+  if (/^stream\b/.test(text)) { termLine('«stream» steuert der Configurator selbst.', 'sys'); return; }
+  try {
+    await cmd(text, { timeout: /^erase all/.test(text) ? 250000 : /^(erase|acccal|gyrocal|save)/.test(text) ? 60000 : 5000 });
+    if (/^(set|defaults|acccal)\b/.test(text)) { S.fcUnsaved = true; }
+    if (/^save\b/.test(text)) { S.fcUnsaved = false; }
+    if (/^(set|defaults|acccal|save)\b/.test(text)) { await loadParams(); for (const n of [...S.dirty.keys()]) if (Math.abs(S.dirty.get(n) - S.params.get(n).value) < 1e-9) S.dirty.delete(n); refreshParamInputs(); updateSaveBar(); }
+  } catch (e) { termLine(e.message, 'err'); }
+}
+
+/* =====================================================================
+ * Allgemeines: Tabs, Dialoge, Download
+ * ===================================================================== */
+function showTab(name) {
+  if (S.tab === 'motors' && name !== 'motors') motorsStop();
+  S.tab = name;
+  document.querySelectorAll('section.tab').forEach(s => s.classList.toggle('active', s.id === 'tab-' + name));
+  document.querySelectorAll('nav a').forEach(a => a.classList.toggle('active', a.dataset.tab === name));
+  if (name === 'pid') setTimeout(drawRates, 0);
+  if (name === 'filters') setTimeout(drawFilter, 0);
+  if (name === 'config') buildParamTable();
+  if (name === 'blackbox' && S.connected) refreshInfo().catch(() => {});
+  if (name === 'setup' && S.connected) refreshInfo().catch(() => {});
+  if (name === 'groundtest') { GT.peak = 0; renderSteps(); }
+  if (name === 'motors') { updateMotorEnable(); drawQuad($('cvQuad'), S.tlm); }
+  if (name === 'cli') setTimeout(() => $('cliIn').focus(), 0);
+  render();
+}
+function updateConnUI() {
+  $('btnConnect').textContent = S.connected ? 'Trennen' : 'Verbinden';
+  $('btnConnect').classList.toggle('primary', !S.connected);
+  $('btnDemo').style.display = S.connected ? 'none' : '';
+  $('connInfo').textContent = S.connected ? (S.demo ? 'Demo' : (S.version?.board || '')) : '';
+  document.querySelectorAll('nav a').forEach(a => a.classList.toggle('disabled', !S.connected && a.dataset.tab !== 'cli'));
+  if (!S.connected && S.tab !== 'welcome') showTab('welcome');
+  for (const b of ['btnGyroCal', 'btnAccCal', 'btnInfo', 'btnReboot', 'btnDfu', 'btnDump', 'btnErase', 'btnExport', 'btnImport', 'btnDefaults']) $(b).disabled = !S.connected;
+  refreshParamInputs(); updateSaveBar(); renderChips(); renderFooter(); updateMotorEnable();
+}
+let toastTimer = null;
+function toast(msg, cls) {
+  document.querySelectorAll('.toast').forEach(t => t.remove());
+  const t = el('div', { class: 'toast ' + (cls || '') }, msg);
+  document.body.append(t);
+  clearTimeout(toastTimer); toastTimer = setTimeout(() => t.remove(), cls === 'err' ? 7000 : 3500);
+}
+function ask(title, html, yes = 'OK') {
+  return new Promise(resolve => {
+    const d = $('dlg');
+    $('dlgTitle').textContent = title; $('dlgText').innerHTML = html; $('dlgYes').textContent = yes;
+    const done = v => { d.close(); $('dlgYes').onclick = $('dlgNo').onclick = null; resolve(v); };
+    $('dlgYes').onclick = () => done(true); $('dlgNo').onclick = () => done(false);
+    d.oncancel = () => done(false);
+    d.showModal();
+  });
+}
+function download(name, content) {
+  const blob = content instanceof Uint8Array ? new Blob([content], { type: 'application/octet-stream' }) : new Blob([content], { type: 'text/plain;charset=utf-8' });
+  const a = el('a', { href: URL.createObjectURL(blob), download: name });
+  document.body.append(a); a.click(); a.remove();
+  setTimeout(() => URL.revokeObjectURL(a.href), 5000);
+}
+function dateStamp() { const d = new Date(); return `${d.getFullYear()}${String(d.getMonth() + 1).padStart(2, '0')}${String(d.getDate()).padStart(2, '0')}`; }
+function setStatus(s) { $('fStatus').textContent = s; }
+
+/* =====================================================================
+ * Start
+ * ===================================================================== */
+function init() {
+  document.querySelectorAll('nav a').forEach(a => a.addEventListener('click', () => showTab(a.dataset.tab)));
+  const conn = () => (S.connected ? disconnect() : connectSerial());
+  $('btnConnect').onclick = conn; $('btnConnect2').onclick = conn;
+  $('btnDemo').onclick = connectDemo; $('btnDemo2').onclick = connectDemo;
+  if (!('serial' in navigator)) $('noSerial').style.display = 'block';
+  $('btnYawZero').onclick = () => { if (S.tlm) S.yawZero = S.tlm.att_y; };
+  $('btnGyroCal').onclick = () => calibrate('gyro');
+  $('btnAccCal').onclick = () => calibrate('acc');
+  $('btnInfo').onclick = () => refreshInfo().catch(e => toast(e.message, 'err'));
+  $('btnReboot').onclick = () => reboot(false);
+  $('btnDfu').onclick = () => reboot(true);
+  $('btnSave').onclick = saveParams;
+  $('btnDiscard').onclick = discardParams;
+  $('propsOff').onchange = updateMotorEnable;
+  $('btnMotorStop').onclick = () => motorsStop();
+  $('btnMapStart').onclick = mapWizard;
+  $('paramFilter').oninput = buildParamTable; $('onlyDiff').onchange = buildParamTable;
+  $('btnExport').onclick = exportDiff;
+  $('btnImport').onclick = () => $('fileImport').click();
+  $('fileImport').onchange = e => { if (e.target.files[0]) importDiff(e.target.files[0]); e.target.value = ''; };
+  $('btnDefaults').onclick = setDefaults;
+  $('btnPause').onclick = () => { S.paused = !S.paused; $('btnPause').textContent = S.paused ? 'Weiter' : 'Pause'; };
+  $('btnStepsReset').onclick = () => { GT.active = 0; GT.res = {}; GT.peak = 0; GT.seen = {}; buildSteps(); };
+  $('btnProtocol').onclick = saveProtocol;
+  $('btnDump').onclick = dumpLogs; $('btnErase').onclick = eraseLogs;
+  $('flightAxis').onchange = () => plotFlight(S.plotIdx || 0);
+  $('dumpPrefix').value = dateStamp();
+  const ci = $('cliIn');
+  ci.addEventListener('keydown', e => {
+    if (e.key === 'Enter') { cliSend(ci.value); ci.value = ''; }
+    else if (e.key === 'ArrowUp') { if (histPos > 0) ci.value = hist[--histPos]; e.preventDefault(); }
+    else if (e.key === 'ArrowDown') { if (histPos < hist.length - 1) ci.value = hist[++histPos]; else { histPos = hist.length; ci.value = ''; } e.preventDefault(); }
+  });
+  document.querySelectorAll('[data-cli]').forEach(b => b.addEventListener('click', () => cliSend(b.dataset.cli)));
+  $('btnCliClear').onclick = () => { $('term').innerHTML = ''; };
+  /* Sicherheit: Motortest stoppen */
+  document.addEventListener('keydown', e => {
+    if ((e.key === 'Escape' || e.key === ' ') && S.tab === 'motors' && document.activeElement?.tagName !== 'INPUT') { motorsStop(); e.preventDefault(); }
+    else if (e.key === 'Escape') motorsStop();
+  });
+  window.addEventListener('blur', () => motorsStop());
+  document.addEventListener('visibilitychange', () => { if (document.hidden) motorsStop(); });
+  window.addEventListener('beforeunload', e => { if (S.dirty.size || S.fcUnsaved) { e.preventDefault(); e.returnValue = ''; } });
+  window.addEventListener('resize', () => { render(); drawRates(); drawFilter(); });
+  if ('serial' in navigator) navigator.serial.addEventListener('disconnect', () => { if (S.connected && !S.demo) { toast('USB getrennt.', 'err'); disconnect(true); } });
+  charts.gyro = new Chart($('chGyro'), [COL.r, COL.p, COL.y], { minSpan: 20 });
+  charts.spr = new Chart($('chSpR'), ['#ffffff', COL.r], { minSpan: 20 });
+  charts.acc = new Chart($('chAcc'), [COL.r, COL.p, COL.y], { minSpan: 0.2 });
+  charts.att = new Chart($('chAtt'), [COL.r, COL.p], { minSpan: 10 });
+  buildChBars(); buildSliders(); buildSteps();
+  showTab('welcome'); updateConnUI();
+  termLine('Configurator bereit. Verbinden oben rechts.', 'sys');
+  if (/[?&]demo\b/.test(location.search)) connectDemo();
+}
+init();
+</script>
+</body>
+</html>

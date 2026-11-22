@@ -77,7 +77,30 @@ typedef struct {
 
     float gyro_cal_samples;
     float gyro_cal_max_dev_dps;
+
+    /* Board (werden nicht von flight_step verwendet, aber wie alle Einstellungen
+     * ueber USB gesetzt und gespeichert) */
+    float motor_out[MIXER_MOTOR_COUNT];  /* Ausgang 1..4 fuer Motor M1..M4 (Betaflight "resource MOTOR") */
+    float vbat_scale;              /* Betaflight vbat_scale (110) */
+    float vbat_warn_cell;          /* Warnung [V pro Zelle] */
+    float rx_uart;                 /* 0 = automatisch suchen, sonst UART 1, 2, 3, 4 oder 6 */
+    float crsf_telemetry;          /* 1 = Akkuspannung an die Fernsteuerung senden */
 } flight_config_t;
+
+/* Gruende, warum nicht gearmt werden kann (Bitmaske flight_t.arm_block, wie Betaflight
+ * "arming disable flags"). 0 = Armen moeglich, sobald der Schalter eingeschaltet wird. */
+enum {
+    ARM_BLOCK_NO_RX        = 1u << 0,   /* kein Empfaenger / Failsafe */
+    ARM_BLOCK_SWITCH       = 1u << 1,   /* Arm-Schalter erst aus- und wieder einschalten */
+    ARM_BLOCK_GYRO_CAL     = 1u << 2,   /* Gyro-Kalibrierung laeuft (Drohne still halten) */
+    ARM_BLOCK_ANGLE        = 1u << 3,   /* zu schraeg (arm_angle_max) */
+    ARM_BLOCK_THROTTLE     = 1u << 4,   /* Gas nicht unten */
+    ARM_BLOCK_USB          = 1u << 5,   /* USB: Log-Download oder Loeschen laeuft */
+    ARM_BLOCK_ACC_CAL      = 1u << 6,   /* ACC-Kalibrierung laeuft */
+    ARM_BLOCK_MOTOR_TEST   = 1u << 7,   /* Motortest aktiv */
+    ARM_BLOCK_MOTOR_MAP    = 1u << 8,   /* motor1_out..motor4_out ist keine gueltige Zuordnung */
+    ARM_BLOCK_GYRO_FAIL    = 1u << 9,   /* Gyro meldet sich nicht (setzt main.c) */
+};
 
 typedef enum { MODE_RATE = 0, MODE_ANGLE = 1 } flight_mode_t;
 
@@ -134,6 +157,8 @@ typedef struct {
     float    motor[MIXER_MOTOR_COUNT];
     uint16_t dshot[MIXER_MOTOR_COUNT];
 
+    uint16_t arm_block;              /* ARM_BLOCK_..., jeden Zyklus neu berechnet */
+
     /* Ereignisse (fuer Summer/LED), werden jeden Zyklus neu gesetzt */
     bool     event_armed, event_disarmed, event_failsafe, event_runaway;
 } flight_t;
@@ -147,3 +172,9 @@ void flight_step(flight_t *f, const flight_input_t *in);
 void flight_force_disarm(flight_t *f);
 /* ACC-Kalibrierung starten: Drohne waehrend ca. 0.5 s still und waagrecht halten */
 void flight_start_acc_calibration(flight_t *f);
+/* Gyro neu kalibrieren (nur disarmed), Drohne ca. 1 s still halten */
+bool flight_start_gyro_calibration(flight_t *f);
+/* true, wenn motor1_out..motor4_out jeden Ausgang 1..4 genau einmal verwenden */
+bool flight_motor_map_valid(const flight_config_t *cfg);
+/* DShot-Werte M1..M4 auf die Ausgaenge 1..4 verteilen (ungueltige Zuordnung -> alle 0) */
+void flight_map_outputs(const flight_t *f, uint16_t out[MIXER_MOTOR_COUNT]);

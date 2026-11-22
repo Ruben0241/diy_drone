@@ -40,6 +40,7 @@ add_executable(firmware.elf
     src/core/pid.c
     src/core/pt1.c
     src/core/rates.c
+    src/core/telemetry.c
 
     # Board GEPRC TAKER F722
     src/board/system.c

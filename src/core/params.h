@@ -34,6 +34,10 @@ bool               params_parse_float(const char *s, float *out);
 /* "name = wert" in buf, Rueckgabe Laenge */
 int                params_format(const flight_config_t *cfg, int i, char *buf, int cap);
 
+/* Maschinenlesbar fuer den Configurator: "$P,name,wert,min,max,nachkommastellen,standard" */
+int                params_format_machine(const flight_config_t *cfg, const flight_config_t *def,
+                                         int i, char *buf, int cap);
+
 /* Als Text speichern/laden. Rueckgabe: Laenge bzw. Anzahl gesetzter Werte (-1 = Fehler) */
 int                params_serialize(const flight_config_t *cfg, char *buf, int cap);
 int                params_deserialize(flight_config_t *cfg, const char *text, int len);

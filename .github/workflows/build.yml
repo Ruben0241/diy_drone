@@ -27,6 +27,9 @@ jobs:
           python tools/analysis/test_fc_analysis.py
           python tools/analysis/test_buildb_log.py
 
+      - name: Configurator (Protokoll gegen die Firmware-Ausgaben)
+        run: node tools/configurator/test/test_protocol.js
+
       - name: Simulation (Firmware-Kern im Physikmodell)
         run: python tools/sim/test_sim.py
 
@@ -41,3 +44,4 @@ jobs:
           path: |
             build/firmware.hex
             build/firmware.bin
+            tools/configurator/
