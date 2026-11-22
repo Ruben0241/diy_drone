@@ -691,7 +691,7 @@ function setDirty(name, value) {
   if (S.tab === 'filters') drawFilter();
 }
 function updateSaveBar() {
-  $('savebar').classList.toggle('show', (S.dirty.size > 0 || S.fcUnsaved) && S.connected);
+  $('savebar').classList.toggle('show', !!((S.dirty.size > 0 || S.fcUnsaved) && S.connected));
   $('saveCount').textContent = S.dirty.size ? `(${S.dirty.size} Wert${S.dirty.size > 1 ? 'e' : ''}: ${[...S.dirty.keys()].slice(0, 4).join(', ')}${S.dirty.size > 4 ? ' …' : ''})`
     : S.fcUnsaved ? '(im Flightcontroller aktiv, aber noch nicht im Flash gespeichert)' : '';
 }
@@ -1012,7 +1012,10 @@ const wrap180 = a => { a = ((a + 180) % 360 + 360) % 360 - 180; return a; };
 
 function fitCanvas(cv) {
   const dpr = window.devicePixelRatio || 1;
-  const w = cv.clientWidth, h = Number(cv.getAttribute('height'));
+  /* Hoehe aus dem HTML einmal merken: cv.height wird unten mit devicePixelRatio
+     ueberschrieben und waere sonst beim naechsten Aufruf (Retina: x2) schon groesser */
+  if (!cv.dataset.h) cv.dataset.h = cv.getAttribute('height');
+  const w = cv.clientWidth, h = Number(cv.dataset.h);
   if (cv.width !== Math.round(w * dpr) || cv.height !== Math.round(h * dpr)) {
     cv.width = Math.round(w * dpr); cv.height = Math.round(h * dpr); cv.style.height = h + 'px';
   }
@@ -1247,7 +1250,7 @@ async function mapWizard() {
         const v = [0, 0, 0, 0]; v[out - 1] = 8; cmd(`motors ${v.join(' ')} ${MOTOR_TIMEOUT_MS}`, { quiet: true }).catch(() => {});
         const onClick = ev => {
           const rc = cv.getBoundingClientRect(), x = ev.clientX - rc.left, y = ev.clientY - rc.top;
-          const s = Math.min(rc.width, Number(cv.getAttribute('height'))) * 0.95, ox = (rc.width - s) / 2, oy = (Number(cv.getAttribute('height')) - s) / 2;
+          const s = Math.min(rc.width, Number(cv.dataset.h || cv.getAttribute('height'))) * 0.95, ox = (rc.width - s) / 2, oy = (Number(cv.dataset.h || cv.getAttribute('height')) - s) / 2;
           let best = -1, bd = 1e9;
           QUAD_POS.forEach((q, i) => { const d = Math.hypot(ox + q[0] * s - x, oy + q[1] * s - y); if (d < bd) { bd = d; best = i; } });
           if (bd < s * 0.25) { cv.removeEventListener('click', onClick); clearInterval(keep); resolve(best); }
