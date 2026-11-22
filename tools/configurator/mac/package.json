@@ -1,0 +1,9 @@
+{
+  "name": "diy-drone-configurator",
+  "productName": "DIY Drone Configurator",
+  "version": "0.2.1",
+  "description": "Configurator fuer die eigene Flugsteuerung (Maturaarbeit KZU)",
+  "main": "main.js",
+  "author": "Ruben Keller",
+  "license": "UNLICENSED"
+}
